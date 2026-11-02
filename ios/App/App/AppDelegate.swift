@@ -9,6 +9,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         registerOrderOfferCategory()
+        // Antes de que iOS entregue un "Responder" del chat (GoNativePlugin.swift)
+        GoNotificationProxy.shared.install()
         return true
     }
 
@@ -82,7 +84,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             intentIdentifiers: [],
             options: []
         )
-        UNUserNotificationCenter.current().setNotificationCategories([category])
+        // "Responder" en los avisos de chat: el backend manda category GO_CHAT y el pase para responder
+        let reply = UNTextInputNotificationAction(
+            identifier: GoNotificationProxy.replyAction,
+            title: "Responder",
+            options: [],
+            textInputButtonTitle: "Enviar",
+            textInputPlaceholder: "Escribí tu respuesta"
+        )
+        let chat = UNNotificationCategory(
+            identifier: GoNotificationProxy.chatCategory,
+            actions: [reply],
+            intentIdentifiers: [],
+            options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category, chat])
     }
 
 }

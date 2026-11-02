@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.godelivery.magdalena",
+      "sha256_cert_fingerprints": [
+        "00:D2:E4:43:C5:DD:07:A3:31:63:60:B5:F8:87:33:64:90:06:44:71:60:3B:9C:63:72:16:65:70:7A:DA:2B:DA",
+        "53:1B:E0:11:31:DD:90:36:01:36:C6:4E:EB:FD:7C:26:48:B2:79:C7:02:9F:9E:AF:40:5F:94:AA:B0:97:25:BD"
+      ]
+    }
+  }
+]

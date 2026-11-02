@@ -3,10 +3,11 @@
 // Como las grandes apps (Uber Eats, Rappi, PedidosYa): una hoja abajo con
 //   1. lo más importante grande: cuándo llega (o qué está pasando),
 //   2. una barra de progreso de 4 pasos,
-//   3. quién lo trae (con chat y llamada),
+//   3. quién lo trae (con chat; el cliente no llama al repartidor),
 //   4. el código de entrega y cómo se paga,
 //   5. el pedido, la dirección y las acciones (ver detalle, ayuda, cancelar).
 // La hoja se achica tocando la manija para ver más mapa.
+import { getUnreadCount, onUnreadChange } from '../../components/chat-notifier.js';
 import { icon } from '../../utils/icons.js';
 import { WEIGHT_TOLERANCE } from '../../utils/weight.js';
 
@@ -79,7 +80,8 @@ export function trackingModel(o, status) {
   if (o.isShopper) {
     m.steps = ['Recibido', 'Comprando', 'En camino', 'Entregado'];
     const miss = Number(o.shopMissingCount) || 0;
-    const changes = miss ? ` Faltó ${miss} producto${miss === 1 ? '' : 's'}: pagás menos.` : '';
+    const edited = Number(o.shopAddedCount) > 0 || Number(o.shopRemovedCount) > 0;
+    const changes = edited ? ' Tu pedido cambió: mirá el total final.' : miss ? ` Faltó ${miss} producto${miss === 1 ? '' : 's'}: pagás menos.` : '';
     if (status === 'completed') return { ...m, tone: 'ok', title: 'Pedido entregado', subtitle: doneText(o), active: 3, done: true };
     if (o.isAtDoor) return { ...m, tone: 'alert', title: `¡${driver} llegó!`, subtitle: 'Salí a recibirlo y tené a mano tu código.', active: 2 };
     if (status === 'delivering') return { ...m, eta: true, title: 'En camino', subtitle: `${driver} ya compró tu pedido y va hacia vos.${changes}`, active: 2 };
@@ -136,17 +138,29 @@ function avatar(name, photo, size = 48) {
   return `<div class="gt-avatar" style="width:${size}px;height:${size}px;background:${bg}"><span>${letter}</span>${inner}</div>`;
 }
 
+// Mensajes sin leer en el botón de chat: la hoja no se redibuja por esto, así que se pinta aparte
+let chatBadgesListening = false;
+function listenChatBadges() {
+  if (chatBadgesListening) return;
+  chatBadgesListening = true;
+  onUnreadChange((counts) => {
+    document.querySelectorAll('.gt-chat-badge').forEach((el) => {
+      const n = counts[el.dataset.chatKey] || 0;
+      el.textContent = n > 9 ? '9+' : String(n);
+      el.style.display = n > 0 ? 'flex' : 'none';
+    });
+  });
+}
+
 /** HTML de la hoja del cliente. flags: { canCancel, isDirectStore, collapsed, waClient } (waClient: link de WhatsApp, sin ayuda) */
 export function renderClientPanel(o, status, flags = {}) {
+  listenChatBadges();
   const md = trackingModel(o, status);
   const tone = TONES[md.tone] || TONES.live;
   const final = status === 'completed' || status === 'cancelled';
   const total = Number(o.totalAmount || o.total || 0);
   const store = o.comercioRealName || o.comercioName || '';
   const hasDriver = Boolean(o.driverId);
-  const phone = String(o.driverPhone || '').replace(/[^\d+]/g, '');
-  // Llamar solo cuando ya viene hacia vos (el chat es el canal principal y cuida el número del repartidor)
-  const canCall = Boolean(phone) && (status === 'delivering' || o.isAtDoor || (o.isTrip && hasDriver));
 
   // 1. Lo principal: cuándo llega / qué pasa
   const hero = `
@@ -180,8 +194,7 @@ export function renderClientPanel(o, status, flags = {}) {
         <div class="gt-driver-meta">${esc(o.isTrip ? (o.tripType === 'auto' ? 'Chofer · Auto' : 'Chofer · Moto') : 'Repartidor de GO')}<span class="gt-live-dot" id="gt-live-dot" title="Ubicación en vivo"></span></div>
       </div>
       <div class="gt-driver-actions">
-        ${canCall ? `<a class="gt-round" href="tel:${esc(phone)}" aria-label="Llamar a ${esc(o.driverName || 'tu repartidor')}">${icon('phone', 19)}</a>` : ''}
-        ${flags.waClient ? '' : `<button class="gt-round gt-round-brand" id="header-chat-v5-btn" aria-label="Chatear">${icon('chatBubble', 19)}</button>`}
+        ${flags.waClient ? '' : `<button class="gt-round gt-round-brand" id="header-chat-v5-btn" aria-label="Chatear" style="position:relative">${icon('chatBubble', 19)}<span class="gt-chat-badge" data-chat-key="${esc(o.id)}_client-delivery" style="display:${getUnreadCount(o.id, 'client-delivery') ? 'flex' : 'none'}">${getUnreadCount(o.id, 'client-delivery')}</span></button>`}
       </div>
     </div>` : (!hasDriver && !final && store && !o.isTrip && !o.isFavor ? `
     <div class="gt-card gt-driver">
@@ -190,7 +203,7 @@ export function renderClientPanel(o, status, flags = {}) {
         <div class="gt-driver-name">${esc(store)}</div>
         <div class="gt-driver-meta">${flags.waClient ? 'Está preparando tu pedido' : '¿Una duda con tu pedido? Escribile'}</div>
       </div>
-      ${flags.waClient ? '' : `<div class="gt-driver-actions"><button class="gt-round gt-round-brand" id="header-chat-v5-btn" aria-label="Chatear con el comercio">${icon('chatBubble', 19)}</button></div>`}
+      ${flags.waClient ? '' : `<div class="gt-driver-actions"><button class="gt-round gt-round-brand" id="header-chat-v5-btn" aria-label="Chatear con el comercio" style="position:relative">${icon('chatBubble', 19)}<span class="gt-chat-badge" data-chat-key="${esc(o.id)}_client-commerce" style="display:${getUnreadCount(o.id, 'client-commerce') ? 'flex' : 'none'}">${getUnreadCount(o.id, 'client-commerce')}</span></button></div>`}
     </div>` : '');
 
   // 4. Código de entrega (lo pide el repartidor al entregar): una franja
@@ -325,6 +338,7 @@ export const CLIENT_PANEL_CSS = `
   .gt-driver-actions { display: flex; gap: 8px; flex-shrink: 0; }
   .gt-round { width: 44px; height: 44px; border-radius: 22px; border: 0; background: var(--gt-bg); color: var(--gt-tx); display: flex; align-items: center; justify-content: center; cursor: pointer; text-decoration: none; box-shadow: 0 1px 2px rgba(15,23,42,.08); }
   .gt-round-brand { background: var(--gt-brand); color: #fff; }
+  .gt-chat-badge { position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px; box-sizing: border-box; border-radius: 10px; background: #fff; color: #E11D48; border: 2px solid #E11D48; font-size: 11px; font-weight: 800; align-items: center; justify-content: center; }
   .gt-alias { display: flex; align-items: center; gap: 12px; border: 1.5px solid var(--gt-brand); }
   .gt-alias-info { flex: 1; min-width: 0; }
   .gt-alias-label { font-size: 12.5px; font-weight: 700; color: var(--gt-tx2, #64748b); }

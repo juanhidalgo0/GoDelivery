@@ -189,6 +189,7 @@ function bindDock() {
         order: orders.find((o) => o.id === id),
         beforeConfirm: () => confirmPickupDistance(orders.find((o) => o.id === id), { preview: true }),
         submit: async () => ({}),
+        uploadPhoto: async (file) => URL.createObjectURL(file),
         onCancel: rerender,
         onDone: () => {
           orders = orders.map((o) => (o.id === id ? { ...o, shopPending: false, status: 'delivering', pickedUpAt: now() } : o));

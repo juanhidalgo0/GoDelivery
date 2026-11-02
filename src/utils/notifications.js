@@ -138,7 +138,10 @@ async function saveNativeToken(tokenValue) {
     token: tokenValue,
     lastSession: serverTimestamp(),
     updatedAt: serverTimestamp(),
-    platform: `${currentPlatform}-native`
+    platform: `${currentPlatform}-native`,
+    // La app con GoNative arma sola el aviso de chat con "Responder" (en Android el servidor
+    // le manda solo datos: a una app vieja eso le llegaría sin mostrarse)
+    chatReply: !!window.Capacitor?.isPluginAvailable?.('GoNative')
   }, { merge: true });
 
   // Mirror token to user doc root to ensure fallback paths can query it
@@ -337,9 +340,11 @@ export async function initPushNotifications() {
           FirebaseMessaging.addListener('notificationReceived', async (event) => {
             console.log('[Push] Native push received in foreground:', event);
           const notification = event.notification || {};
-          const { title, body } = notification;
-          const isOnDelivery = window.location.hash.startsWith('#/delivery');
           const pushData = notification.data || {};
+          // Los avisos de chat a Android con "Responder" llegan solo con datos
+          const title = notification.title || pushData.title;
+          const body = notification.body || pushData.body;
+          const isOnDelivery = window.location.hash.startsWith('#/delivery');
           const isAdminAlert = pushData.type === 'admin_support_alert' || pushData.channelId === 'admin_alerts';
 
           // If user is operating as delivery driver, suppress admin duplicate push in foreground so audio is not interrupted

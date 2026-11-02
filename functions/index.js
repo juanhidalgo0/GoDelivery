@@ -547,7 +547,58 @@ async function sendPush(tokens, notification, data = {}, ownerUid = null) {
   }
 
   logger.info(`Push sent total: ${totalSuccess} success, ${totalFailure} failed`);
+  return { success: totalSuccess, failure: totalFailure };
 }
+
+const CHAT_REPLY_URL = `https://us-central1-${process.env.GCLOUD_PROJECT || "godelivery-magdalena"}.cloudfunctions.net/chatReplyFromPush`;
+
+/** Tokens de Android cuya app ya arma sola el aviso de chat con el cuadro para responder. */
+async function getReplyableAndroidTokens(userId) {
+  try {
+    const snap = await db.collection("users").doc(userId).collection("fcmTokens").where("chatReply", "==", true).get();
+    return new Set(snap.docs.filter((d) => d.data().platform === "android-native").map((d) => d.data().token || d.id));
+  } catch (e) {
+    logger.warn(`Could not read reply tokens for ${userId}:`, e);
+    return new Set();
+  }
+}
+
+/**
+ * Aviso de chat solo con datos, para Android con GoMessagingService: la app lo muestra con
+ * "Responder". Sin el bloque notification, porque si no Android lo muestra solo y sin el botón.
+ * Devuelve cuántos se enviaron.
+ */
+async function sendReplyablePush(tokens, notification, data, ownerUid) {
+  const projectId = process.env.GCLOUD_PROJECT || "godelivery-magdalena";
+  const url = `https://${projectId}.web.app/${String(data.url || "#/").replace(/^\//, "")}`;
+  try {
+    const response = await admin.messaging().sendEachForMulticast({
+      data: sanitizeFcmData({ ...data, goReply: "1", title: notification.title || "GO!", body: notification.body || "", url }),
+      android: { priority: "high", ttl: 3600000 },
+      tokens
+    });
+    response.responses.forEach((r, i) => {
+      if (!r.success && DEAD_TOKEN_ERROR_CODES.has(r.error?.code)) pruneDeadToken(ownerUid, tokens[i]);
+    });
+    return response.successCount;
+  } catch (err) {
+    logger.error("Error sending replyable chat push:", err);
+    return 0;
+  }
+}
+
+/** Respuesta escrita en la notificación del chat (GoNativePlugin). Ver functions/chat-reply.js */
+exports.chatReplyFromPush = onRequest({ maxInstances: 10 }, async (req, res) => {
+  if (req.method !== "POST") { res.status(405).send("Método no permitido"); return; }
+  try {
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const [status, msg] = await require("./chat-reply").postReply(db, { token: body.token, text: body.text });
+    res.status(status).json({ ok: status === 200, message: msg });
+  } catch (err) {
+    logger.error("chatReplyFromPush failed:", err);
+    res.status(500).json({ ok: false, message: "Error del servidor" });
+  }
+});
 
 const isGoMarketName = (name) => {
   const n = String(name || "").toLowerCase();
@@ -1057,14 +1108,13 @@ exports.onNewChatMessage = onDocumentCreated("chats/{chatId}/messages/{messageId
   const message = event.data.data();
   const chatId = event.params.chatId;
   
-  if (!message || !message.senderId) return;
+  if (!message || !message.senderId || message.orderEvent) return;
 
   try {
+    // El doc del chat lo crea la app sin esperar: si el mensaje llega antes, igual hay que avisar
     const chatDoc = await db.collection("chats").doc(chatId).get();
-    if (!chatDoc.exists) return;
-    
-    const chatData = chatDoc.data();
-    const orderId = chatData.orderId;
+    const chatData = chatDoc.exists ? chatDoc.data() : {};
+    const orderId = chatData.orderId || chatId.split("_")[0];
     const senderName = message.senderName || "Mensaje nuevo";
     
     // Each chat notifies only its two sides. This used to notify everyone in the order, so the
@@ -1089,26 +1139,40 @@ exports.onNewChatMessage = onDocumentCreated("chats/{chatId}/messages/{messageId
     // 3. Filter out sender and duplicates
     recipientIds = [...new Set(recipientIds)].filter(id => id && String(id) !== String(message.senderId));
 
-    const msgBody = message.text 
-      ? (message.text.length > 150 ? message.text.substring(0, 150) + "..." : message.text)
-      : (message.audioUrl ? "🎤 Mensaje de voz" : (message.imageUrl ? "📷 Imagen adjunta" : "Nuevo mensaje"));
+    // Por tipo primero: una versión vieja de la app crea la foto con el texto "Subiendo imagen..."
+    const msgBody = message.type === "image" ? "📷 Foto"
+      : message.type === "audio" ? "🎤 Mensaje de voz"
+      : message.text
+        ? (message.text.length > 150 ? message.text.substring(0, 150) + "..." : message.text)
+        : "Nuevo mensaje";
 
-    // 4. Send Push Notification to all recipients
+    // Qué se pudo enviar a cada uno: sin esto no hay forma de medir si los avisos llegan
+    const delivery = {};
+// 4. Send Push Notification to all recipients
     for (const recipientId of recipientIds) {
       const tokens = await getUserTokens(recipientId);
+      delivery[recipientId] = { tokens: tokens.length, sent: 0 };
       if (tokens.length > 0) {
-        await sendPush(tokens, {
-          title: senderName,
-          body: msgBody
-        }, {
+        // Pase para responder desde la notificación (functions/chat-reply.js)
+        const replyToken = await require("./chat-reply").makeReplyToken(db, { chatId, uid: recipientId })
+          .catch((e) => { logger.warn("Could not make chat reply token:", e); return ""; });
+        const chatData = {
           tag: `chat-${chatId}`,
           url: `#/mis-chats?chatId=${chatId}`,
           type: "chat_message",
           sound: "chat.mp3",
           channelId: "chat_alerts",
           chatId: chatId,
-          orderId: orderId || ""
-        });
+          orderId: orderId || "",
+          ...(replyToken ? { category: "GO_CHAT", replyToken, replyUrl: CHAT_REPLY_URL } : {})
+        };
+        // Android con la app nueva arma el aviso él mismo, con el cuadro para responder
+        const replyable = replyToken ? await getReplyableAndroidTokens(recipientId) : new Set();
+        const plain = tokens.filter((t) => !replyable.has(t));
+        const own = tokens.filter((t) => replyable.has(t));
+        const pushed = plain.length ? await sendPush(plain, { title: senderName, body: msgBody }, chatData) : null;
+        const pushedOwn = own.length ? await sendReplyablePush(own, { title: senderName, body: msgBody }, chatData, recipientId) : 0;
+        delivery[recipientId].sent = (pushed ? pushed.success : 0) + pushedOwn;
       }
 
       // Also add in-app notification doc for the recipient
@@ -1126,8 +1190,64 @@ exports.onNewChatMessage = onDocumentCreated("chats/{chatId}/messages/{messageId
         logger.error(`Error writing chat notification doc for ${recipientId}:`, nErr);
       }
     }
+    const { REMIND_AFTER_MS } = require("./chat-reminders");
+    const canRemind = Object.values(delivery).some((d) => d.tokens > 0);
+    await event.data.ref.update({
+      delivery,
+      ...(canRemind ? { remindAt: admin.firestore.Timestamp.fromMillis(Date.now() + REMIND_AFTER_MS) } : {}),
+    }).catch((e) => logger.warn("Could not save chat delivery:", e));
+
+    // Insultos o querer arreglar por fuera de la app: al admin, para que mire
+    const flagged = await require("./chat-events").flagChatMessage(db, { chatId, messageId: event.params.messageId, message })
+      .catch((e) => { logger.warn("Could not flag chat message:", e); return null; });
+    if (flagged) {
+      const adminTokens = await getAdminTokens();
+      if (adminTokens.length) await sendPush(adminTokens, { title: "Chat para revisar", body: flagged }, { tag: `chat-flag-${chatId}`, url: "#/admin/errores", channelId: "admin_alerts" });
+    }
+
+    // Texto del audio, para leerlo sin escucharlo. Hasta 60 s: lo que admite el pedido directo.
+    if (message.type === "audio" && message.audioUrl && Number(message.duration) > 0 && Number(message.duration) < 60) {
+      const res = await fetch(message.audioUrl);
+      const bytes = res.ok ? Buffer.from(await res.arrayBuffer()) : null;
+      const { transcribeAudio } = require("./speech-to-text");
+      const out = bytes && await transcribeAudio(bytes, { logger, label: "Chat" });
+      if (out) {
+        db.collection("wa_ai_log").add({ at: FieldValue.serverTimestamp(), kind: "chat_audio", seconds: out.seconds }).catch(() => {});
+        if (out.text) await event.data.ref.update({ transcript: out.text.slice(0, 2000) });
+      }
+    }
   } catch (err) {
     logger.error("Error in onNewChatMessage:", err);
+  }
+});
+
+/** Mensajes sin leer: se recuerda una vez (ver functions/chat-reminders.js) */
+exports.chatUnreadReminder = onSchedule({ schedule: "every 1 minutes", timeoutSeconds: 120, maxInstances: 1 }, async () => {
+  const { runChatReminders } = require("./chat-reminders");
+  await runChatReminders({ db, getUserTokens, sendPush, logger });
+});
+
+/** Reacción nueva: se le avisa a quien escribió el mensaje */
+exports.onChatReaction = onDocumentUpdated("chats/{chatId}/messages/{messageId}", async (event) => {
+  const before = event.data.before.data().reactions || {};
+  const after = event.data.after.data();
+  const reactions = after.reactions || {};
+  const changed = Object.keys(reactions).filter((uid) => reactions[uid] && reactions[uid] !== before[uid] && String(uid) !== String(after.senderId));
+  if (!changed.length || !after.senderId) return;
+  try {
+    const tokens = await getUserTokens(after.senderId);
+    if (!tokens.length) return;
+    const chatId = event.params.chatId;
+    for (const uid of changed) {
+      const who = await db.collection("users").doc(uid).get();
+      const name = who.exists ? firstName(who.data().displayName || who.data().name) : "";
+      await sendPush(tokens, {
+        title: `${name || "Alguien"} reaccionó ${reactions[uid]}`,
+        body: after.type === "image" ? "A tu foto" : after.type === "audio" ? "A tu mensaje de voz" : String(after.text || "A tu mensaje").slice(0, 100),
+      }, { tag: `chat-${chatId}`, url: `#/mis-chats?chatId=${chatId}`, type: "chat_message", channelId: "chat_alerts", chatId, orderId: chatId.split("_")[0] });
+    }
+  } catch (err) {
+    logger.error("Error in onChatReaction:", err);
   }
 });
 
@@ -1214,7 +1334,10 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
   const orderId = event.params.orderId;
 
   if (!before || !after) return;
-  
+
+  await require("./chat-events").writeOrderChatEvents(db, orderId, before, after)
+    .catch((e) => logger.warn("Could not write order event to chat:", e));
+
   // Only trigger on important changes
   if (before.status === after.status && 
       before.paymentStatus === after.paymentStatus &&

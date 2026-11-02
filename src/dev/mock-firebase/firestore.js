@@ -183,8 +183,7 @@ export async function runTransaction(_db, fn) {
 
 // ── En vivo ──
 export function onSnapshot(ref, a, b) {
-  const cb = typeof a === 'function' ? a : (a && a.next) || (() => {});
-  void b;
+  const cb = typeof a === 'function' ? a : (a && a.next) || (typeof b === 'function' ? b : () => {});
   if (ref.type === 'doc') {
     if (!docSubs.has(ref.path)) docSubs.set(ref.path, new Set());
     docSubs.get(ref.path).add(cb);

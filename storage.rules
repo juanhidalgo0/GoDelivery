@@ -107,6 +107,17 @@ service firebase.storage {
       allow write: if isSignedIn() && fileName.split('_')[0] == request.auth.uid && underSize(15);
     }
 
+    // Foto del ticket de "compra el repartidor": la sube el repartidor del pedido; la ven él,
+    // el cliente y la administración.
+    match /order_tickets/{orderId}/{fileName} {
+      allow read:  if isAdmin() || (isSignedIn() && request.auth.uid in [
+        firestore.get(/databases/(default)/documents/orders/$(orderId)).data.get('driverId', ''),
+        firestore.get(/databases/(default)/documents/orders/$(orderId)).data.get('userId', '')
+      ]);
+      allow write: if isSignedIn() && isImage() && underSize(10)
+        && firestore.get(/databases/(default)/documents/orders/$(orderId)).data.get('driverId', '') == request.auth.uid;
+    }
+
     // Cualquier otra ruta queda cerrada por defecto.
   }
 }

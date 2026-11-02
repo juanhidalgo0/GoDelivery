@@ -34,8 +34,11 @@ workflows:
 
       - name: Set iOS Build Number
         script: |
+          # agvtool no hacía nada (el proyecto no tiene VERSIONING_SYSTEM): el build quedaba en 14.
+          # La app y la extensión de compartir tienen que llevar el mismo número, si no Apple rechaza el envío.
           cd ios/App
-          agvtool new-version -all $(($BUILD_NUMBER + 10))
+          sed -i '' "s/CURRENT_PROJECT_VERSION = [0-9]*;/CURRENT_PROJECT_VERSION = $(($BUILD_NUMBER + 10));/g" App.xcodeproj/project.pbxproj
+          grep "CURRENT_PROJECT_VERSION" App.xcodeproj/project.pbxproj
 
       - name: Setup keychain and signing certificates
         script: |
@@ -45,6 +48,8 @@ workflows:
           # Descarga automáticamente perfiles y certificados usando la API de App Store Connect
           # (Requiere configurar las variables API de Apple en la web de Codemagic)
           app-store-connect fetch-signing-files "com.godelivery.magdalena" --type IOS_APP_STORE --create --certificate-key=@env:CERTIFICATE_PRIVATE_KEY
+          # La extensión de compartir comprobantes lleva su propio perfil
+          app-store-connect fetch-signing-files "com.godelivery.magdalena.ShareExtension" --type IOS_APP_STORE --create --certificate-key=@env:CERTIFICATE_PRIVATE_KEY
           
           # Añade los certificados al llavero para la compilación
           keychain add-certificates

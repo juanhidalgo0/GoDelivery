@@ -109,7 +109,10 @@ async function init() {
     import('@capacitor/splash-screen').then(({ SplashScreen }) => {
       SplashScreen.hide();
     }).catch(err => console.warn('GoDelivery: Failed to hide native splash screen:', err));
-    
+
+    // Links de GO! que abren la app en la pantalla del link
+    import('./utils/app-links.js').then(m => m.initAppLinks()).catch(() => {});
+
     // Check for App Updates in Play Store (Android ONLY) asynchronously without blocking startup
     const platform = window.Capacitor.getPlatform ? window.Capacitor.getPlatform() : '';
     if (platform === 'android') {
@@ -1064,6 +1067,7 @@ async function init() {
         import('./components/challenge-progress.js').then(m => m.initChallengeProgress()).catch(() => {});
         import('./components/commerce-monitor.js').then(m => m.initCommerceMonitor());
         import('./components/chat-notifier.js').then(m => m.initChatNotifier());
+        import('./utils/share-receiver.js').then(m => m.initShareReceiver()).catch(() => {});
         
         // Initialize floating support chatbot dynamically
         import('./components/support-bot.js').then(m => m.initSupportBot()).catch(err => console.warn('Failed to load support bot:', err));

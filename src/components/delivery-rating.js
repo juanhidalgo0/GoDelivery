@@ -6,6 +6,7 @@ import { showModal, closeModal } from './modal.js';
 import { icon } from '../utils/icons.js';
 import { showToast } from './toast.js';
 import { formatPrice } from '../utils/format.js';
+import { requestAppReview } from '../utils/native.js';
 
 /**
  * Show a rating modal for a delivered order
@@ -254,6 +255,8 @@ export function showDeliveryRating(order) {
       closeModal();
       showToast('¡Gracias por tu puntuación!', 'success');
       askStoreRating(order);
+      // Contento con la entrega: el cartel de la tienda para calificar GO! (espera al del comercio)
+      if (selectedRating === 5) requestAppReview();
     } catch (err) {
       console.error('Error submitting rating:', err);
       

@@ -22,6 +22,7 @@ const auth = admin.auth();
 const FN = `http://127.0.0.1:5001/${PROJECT}/us-central1`;
 const { Timestamp, FieldValue } = require('firebase-admin/firestore');
 
+const { applyShopping: applyServer } = require('./shopper.js');
 let ok = 0, bad = 0;
 const t = async (name, fn) => { try { await fn(); ok++; console.log(`ok    ${name}`); } catch (e) { bad++; console.log(`FALLA ${name}\n      ${e.stack || e.message}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -250,10 +251,10 @@ await t('compra: solo el repartidor del pedido', async () => {
   const r = await checkout(otro, { results: {} });
   assert.strictEqual(r.status, 403);
 });
-await t('compra: el ticket muy distinto de lo marcado se rechaza', async () => {
-  const r = await checkout(cadete, { results: { 2: { status: 'missing' } }, ticketTotal: 2000 });
+await t('compra: el ticket no vale si es cero o negativo', async () => {
+  const r = await checkout(cadete, { results: {}, ticketTotal: -5 });
   assert.strictEqual(r.status, 400);
-  assert.match(r.body.error, /no coincide/);
+  assert.match(r.body.error, /no es válido/);
 });
 await t('compra: faltante, parcial y reemplazo; el total se cierra con el ticket', async () => {
   // Coca: 2 → reemplazo por Pepsi a 3300 x2 · Alfajor: había 2 de 3 · Yerba: no había
@@ -316,6 +317,138 @@ await t('si no había nada, el pedido se cancela sin cargo', async () => {
   assert.strictEqual(c.body.cancelled, true);
   assert.strictEqual((await db.doc(`orders/${id}`).get()).data().status, 'cancelled');
 });
+await t('el cliente cambia el pedido: se saca, se agrega y manda el ticket, sin agotar lo sacado', async () => {
+  const alfa = await prod('v-alfa');
+  const r = await order(CID, [item(CID, alfa.id, 'Alfajor', 1, 1100)]);
+  const id = r.body.orders[0].docId;
+  await db.doc(`orders/${id}`).update({ driverId: cadete.uid, status: 'accepted', queueTargetDriverId: null });
+  const c = await post('shopperCheckout', { orderId: id, results: { 0: { status: 'removed' } }, ticketTotal: 50000, added: [{ name: 'Fernet 750', price: 15000, qty: 2 }] }, { Authorization: `Bearer ${cadete.token}` });
+  assert.strictEqual(c.status, 200, JSON.stringify(c.body));
+  const o = (await db.doc(`orders/${id}`).get()).data();
+  assert.strictEqual(o.subtotal, 50000, 'manda el ticket aunque difiera');
+  assert.strictEqual(o.shopComputedTotal, 30000);
+  assert.deepStrictEqual(o.items.map((i) => i.shopStatus), ['removed', 'added']);
+  assert.strictEqual(o.items[1].qty, 2);
+  assert.strictEqual(o.shopRemovedCount, 1);
+  assert.strictEqual(o.shopAddedCount, 1);
+  assert.strictEqual(o.shopMissingCount, 0);
+  assert.strictEqual((await prod('v-alfa')).data().unavailableReason, undefined, 'lo sacado sigue a la venta');
+  await db.doc(`orders/${id}`).update({ status: 'cancelled' });
+  const sinNombre = applyServer({ items: [{ name: 'A', qty: 1, price: 100 }] }, {}, null, [{ name: '', price: 100 }]);
+  assert.match(sinNombre.errors[0], /producto agregado/);
+  const nada = applyServer({ items: [{ name: 'A', qty: 1, price: 100 }] }, { 0: { status: 'removed' } });
+  assert.strictEqual(nada.allMissing, true, 'sin nada para llevar se cancela');
+});
+await t('el cliente pide más unidades; la foto del ticket queda solo si es de este pedido', async () => {
+  const alfa = await prod('v-alfa');
+  const r = await order(CID, [item(CID, alfa.id, 'Alfajor', 1, 1100)]);
+  const id = r.body.orders[0].docId;
+  await db.doc(`orders/${id}`).update({ driverId: cadete.uid, status: 'accepted', queueTargetDriverId: null });
+  const bucket = `${PROJECT}.appspot.com`;
+  // Con el SDK, igual que la app (reglas de storage.rules)
+  const { initializeApp } = await import('firebase/app');
+  const { getStorage, connectStorageEmulator, ref, uploadBytes } = await import('firebase/storage');
+  const upload = async (who) => {
+    const app = initializeApp({ projectId: PROJECT, storageBucket: bucket, apiKey: 'fake' }, `up-${who.uid}`);
+    const storage = getStorage(app);
+    connectStorageEmulator(storage, '127.0.0.1', 9199, { mockUserToken: who.token });
+    try { await uploadBytes(ref(storage, `order_tickets/${id}/a.jpg`), new Uint8Array([1, 2, 3]), { contentType: 'image/jpeg' }); return 'ok'; } catch (e) { return e.code; }
+  };
+  assert.strictEqual(await upload(otro), 'storage/unauthorized', 'otro repartidor no sube');
+  assert.strictEqual(await upload(cadete), 'ok', 'el del pedido sí');
+  const url = `https://firebasestorage.googleapis.com/v0/b/x/o/${encodeURIComponent(`order_tickets/${id}/a.jpg`)}?alt=media`;
+  const c = await post('shopperCheckout', { orderId: id, results: { 0: { status: 'found', qty: 3 } }, ticketPhoto: url }, { Authorization: `Bearer ${cadete.token}` });
+  assert.strictEqual(c.status, 200, JSON.stringify(c.body));
+  const o = (await db.doc(`orders/${id}`).get()).data();
+  assert.strictEqual(o.items[0].qty, 3);
+  assert.strictEqual(o.items[0].shopStatus, 'increased');
+  assert.strictEqual(o.subtotal, 3300);
+  assert.strictEqual(o.shopTicketPhoto, url);
+  await db.doc(`orders/${id}`).update({ status: 'cancelled' });
+  const r2 = await order(CID, [item(CID, alfa.id, 'Alfajor', 1, 1100)]);
+  const id2 = r2.body.orders[0].docId;
+  await db.doc(`orders/${id2}`).update({ driverId: cadete.uid, status: 'accepted', queueTargetDriverId: null });
+  await post('shopperCheckout', { orderId: id2, results: {}, ticketPhoto: 'https://malo.example/order_tickets/x/a.jpg' }, { Authorization: `Bearer ${cadete.token}` });
+  assert.strictEqual((await db.doc(`orders/${id2}`).get()).data().shopTicketPhoto, null, 'una URL ajena no se guarda');
+  await db.doc(`orders/${id2}`).update({ status: 'cancelled' });
+  assert.strictEqual(applyServer({ items: [] }, {}, null, [{ name: '<img>Fernet', price: 1 }]).patch.items[0].name, 'imgFernet');
+});
+await t('chat: el aviso sale aunque el doc del chat todavía no exista, y queda medido', async () => {
+  const alfa = await prod('v-alfa');
+  const r = await order(CID, [item(CID, alfa.id, 'Alfajor', 1, 1100)]);
+  const id = r.body.orders[0].docId;
+  await db.doc(`orders/${id}`).update({ driverId: cadete.uid, status: 'accepted', queueTargetDriverId: null });
+  const chatId = `${id}_client-delivery`;
+  const m = await db.collection(`chats/${chatId}/messages`).add({ senderId: cadete.uid, senderName: 'Cadete', type: 'image', text: 'Subiendo imagen...', timestamp: new Date(), read: false });
+  const avisos = () => db.collection(`users/${cliente.uid}/notifications`).where('chatId', '==', chatId).get();
+  const n = await until(async () => { const q = await avisos(); return q.size ? q : null; });
+  assert.ok(n, 'el cliente recibe el aviso');
+  assert.strictEqual(n.docs[0].data().body, '📷 Foto', 'no dice "Subiendo imagen..."');
+  const d = await until(async () => (await m.get()).data().delivery);
+  assert.deepStrictEqual(d[cliente.uid], { tokens: 0, sent: 0 });
+  await db.doc(`orders/${id}`).update({ status: 'cancelled' });
+});
+await t('chat: recordatorio una sola vez si sigue sin leer; nada si ya lo leyó', async () => {
+  const { runChatReminders } = require('./chat-reminders.js');
+  const alfa = await prod('v-alfa');
+  const r = await order(CID, [item(CID, alfa.id, 'Alfajor', 1, 1100)]);
+  const id = r.body.orders[0].docId;
+  await db.doc(`orders/${id}`).update({ driverId: cadete.uid, status: 'accepted', queueTargetDriverId: null });
+  const box = db.collection(`chats/${id}_client-delivery/messages`);
+  const before = Timestamp.fromMillis(Date.now() - 1000);
+  // Directo, sin pasar por los triggers del emulador: el id viejo en otro chat
+  const sinLeer = await box.add({ senderId: cadete.uid, senderName: 'Cadete', text: 'hola', read: false, remindAt: before });
+  const leido = await box.add({ senderId: cadete.uid, senderName: 'Cadete', text: 'hola', read: true, remindAt: before });
+  const pushes = [];
+  const deps = { db, logger: console, getUserTokens: async (u) => [u], sendPush: async (tokens, n) => { pushes.push([tokens[0], n.title]); } };
+  await runChatReminders(deps);
+  const mine = pushes.filter(([u]) => u === cliente.uid);
+  assert.strictEqual(mine.length, 1, 'solo el que sigue sin leer');
+  assert.ok(!pushes.some(([u]) => u === cadete.uid), 'no se le avisa a quien lo escribió');
+  assert.strictEqual((await sinLeer.get()).data().remindAt, undefined);
+  assert.strictEqual((await leido.get()).data().remindAt, undefined);
+  const n = pushes.length;
+  await runChatReminders(deps);
+  assert.strictEqual(pushes.length, n, 'no se repite');
+  await db.doc(`orders/${id}`).update({ status: 'cancelled' });
+});
+await t('chat: los avisos del pedido entran una vez, no suman ni mandan aviso', async () => {
+  const alfa = await prod('v-alfa');
+  const r = await order(CID, [item(CID, alfa.id, 'Alfajor', 1, 1100)]);
+  const id = r.body.orders[0].docId;
+  const ref = db.doc(`orders/${id}`);
+  await ref.update({ driverId: cadete.uid, driverName: 'Alejo Cantero', status: 'accepted', queueTargetDriverId: null });
+  await ref.update({ status: 'delivering' });
+  await ref.update({ isAtDoor: true });
+  const box = db.collection(`chats/${id}_client-delivery/messages`);
+  const all = await until(async () => { const q = await box.get(); return q.size >= 3 ? q : null; });
+  assert.ok(all, 'llegan los avisos');
+  const texts = all.docs.map(d => d.data().text);
+  assert.ok(texts.includes('Alejo retiró tu pedido y va en camino'), texts.join(' | '));
+  assert.ok(texts.includes('Alejo llegó a tu puerta'));
+  assert.ok(all.docs.every(d => d.data().read === true && d.data().senderId === 'system'));
+  await ref.update({ note: 'otra cosa' });
+  await sleep(800);
+  assert.strictEqual((await box.get()).size, all.size, 'no se repiten');
+  const avisos = await db.collection(`users/${cliente.uid}/notifications`).where('chatId', '==', `${id}_client-delivery`).get();
+  assert.strictEqual(avisos.size, 0, 'no duplican el push del estado');
+  await ref.update({ status: 'cancelled' });
+});
+await t('chat: al admin solo van insultos o arreglos por fuera, sin marcar charla normal', async () => {
+  const { flagReason, flagChatMessage } = require('./chat-events.js');
+  for (const ok of ['Dale boludo ya bajo', 'Llegué, tocá timbre', 'No hay Coca, ¿te llevo Pepsi?', 'Te cobro en efectivo']) assert.strictEqual(flagReason(ok), null, ok);
+  assert.match(flagReason('sos un pelotudo'), /Insultos/);
+  assert.match(flagReason('Te cobro por fuera de la app'), /fuera de la app/);
+  const out = await flagChatMessage(db, { chatId: 'o1_client-delivery', messageId: 'mflag', message: { type: 'text', senderName: 'A', text: 'hijo de puta' } });
+  assert.match(out, /Insultos/);
+  const e = (await db.doc('client_errors/chat_flag_mflag').get()).data();
+  assert.strictEqual(e.status, 'open');
+  assert.strictEqual(e.kind, 'auditoria');
+});
+await t('los montos se leen con punto o coma de miles', async () => {
+  const { parseMoney } = await import('../src/utils/shopper.js');
+  for (const [v, n] of [['12.500', 12500], ['12,500', 12500], ['12500', 12500], ['$ 1.250.000', 1250000], ['1250,50', 1250.5], ['', 0]]) assert.strictEqual(parseMoney(v), n, v);
+});
 await t('vuelve a estar disponible cuando vence el plazo', async () => {
   const { restoreMissing } = require('./ventra-bridge.js');
   const y = await prod('v-yerba');
@@ -362,14 +495,18 @@ await t('la app muestra las mismas cuentas que el servidor (src/utils/shopper.js
     [{ 2: { status: 'replaced', replacementName: 'D', replacementPrice: 1200 } }, ''],
     [{ 0: { status: 'missing' }, 1: { status: 'missing' }, 2: { status: 'missing' } }, null],
     [{}, 99999],
+    [{ 0: { status: 'removed' } }, 50000, [{ name: 'Nuevo', price: 1500, qty: 3 }]],
+    [{ 0: { status: 'removed' }, 1: { status: 'removed' }, 2: { status: 'missing' } }, null],
+    [{}, null, [{ name: '', price: 0 }]],
+    [{ 0: { status: 'found', qty: 5 } }, null],
   ];
   // Por peso: lo que le cobraron
   const weighed = { ...base, items: [...base.items, { name: 'Vacío', qty: 2, price: 12000, soldByWeight: true, weightStep: 500, pricePerKg: 24000 }] };
   for (const [results, ticket] of [[{}, null], [{ 3: { status: 'found', paid: 25300 } }, null], [{ 3: { status: 'missing' } }, null]]) {
     assert.deepStrictEqual(client.applyShopping(weighed, results, ticket), server.applyShopping(weighed, results, ticket), JSON.stringify(results));
   }
-  for (const [results, ticket] of cases) {
-    assert.deepStrictEqual(client.applyShopping(base, results, ticket), server.applyShopping(base, results, ticket), JSON.stringify(results));
+  for (const [results, ticket, added] of cases) {
+    assert.deepStrictEqual(client.applyShopping(base, results, ticket, added), server.applyShopping(base, results, ticket, added), JSON.stringify(results));
   }
   for (const m of ['efectivo', 'mercadopago', 'tarjeta', 'transferencia', 'online']) {
     assert.strictEqual(client.isOnlinePayment(m), server.isOnlinePayment(m), m);

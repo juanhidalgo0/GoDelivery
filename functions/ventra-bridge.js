@@ -442,6 +442,17 @@ async function handle(db, storage, req, res, logger) {
  * El repartidor terminó de comprar: renglones encontrados, faltantes y reemplazos + total del
  * ticket. Solo el repartidor del pedido, una vez. Lo que faltó queda agotado 24 h en la app.
  */
+// Foto del ticket: solo una URL de Storage de la carpeta de este pedido
+function ticketPhotoOf(url, orderId) {
+  try {
+    const u = new URL(String(url || ""));
+    const host = ["firebasestorage.googleapis.com", "127.0.0.1", "localhost"].includes(u.hostname);
+    return host && decodeURIComponent(u.pathname).includes(`/order_tickets/${orderId}/`) ? u.href : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function shopperCheckout(db, uid, body) {
   const orderRef = db.collection("orders").doc(String(body.orderId || ""));
   const out = await db.runTransaction(async (tx) => {
@@ -452,7 +463,7 @@ async function shopperCheckout(db, uid, body) {
     if (o.driverId !== uid) throw new BridgeError(403, "El pedido es de otro repartidor");
     if (o.shopPending === false) throw new BridgeError(409, "La compra ya se cargó");
     if (["cancelled", "completed", "delivered"].includes(o.status)) throw new BridgeError(409, "El pedido ya terminó");
-    const { patch, missing, errors, allMissing } = applyShopping(o, body.results || {}, body.ticketTotal ?? null);
+    const { patch, missing, errors, allMissing } = applyShopping(o, body.results || {}, body.ticketTotal ?? null, body.added || []);
     if (errors.length) throw new BridgeError(400, errors[0]);
     if (allMissing) {
       tx.update(orderRef, {
@@ -460,11 +471,11 @@ async function shopperCheckout(db, uid, body) {
         status: "cancelled",
         cancelledAt: FieldValue.serverTimestamp(),
         cancelledBy: "driver_shopper",
-        cancelReason: "No había ninguno de los productos en el local.",
+        cancelReason: missing.length === (o.items || []).length ? "No había ninguno de los productos en el local." : "No quedó ningún producto en el pedido.",
         shoppedAt: FieldValue.serverTimestamp(),
       });
     } else {
-      tx.update(orderRef, { ...patch, shoppedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+      tx.update(orderRef, { ...patch, shopTicketPhoto: ticketPhotoOf(body.ticketPhoto, orderRef.id), shoppedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
     }
     return { order: o, missing, allMissing, patch };
   });
@@ -481,12 +492,19 @@ async function shopperCheckout(db, uid, body) {
     }
     await batch.commit();
   }
-  // Aviso al cliente si cambió algo
-  if (out.missing.length || out.patch.shopReplacedCount) {
+  // Aviso al cliente si cambió algo, también si el ticket dio distinto de lo que iba a pagar
+  const { shopRemovedCount: removedN, shopReplacedCount: replacedN, shopAddedCount: addedN } = out.patch;
+  if (out.missing.length || removedN || replacedN || addedN || Math.round(out.patch.total) !== Math.round(out.patch.estimatedTotal)) {
     const n = out.order.orderId || "";
+    const changes = [
+      out.missing.length && `faltaron ${out.missing.length}`,
+      removedN && `se sacaron ${removedN}`,
+      replacedN && `se reemplazaron ${replacedN}`,
+      addedN && `se agregaron ${addedN}`,
+    ].filter(Boolean).join(", ");
     const text = out.allMissing
-      ? "No había ninguno de los productos: el pedido se canceló sin cargo."
-      : `Faltaron ${out.missing.length} producto${out.missing.length === 1 ? "" : "s"}${out.patch.shopReplacedCount ? ` y se reemplazaron ${out.patch.shopReplacedCount}` : ""}. Total final: $${Math.round(out.patch.total)}.`;
+      ? "No quedó ningún producto: el pedido se canceló sin cargo."
+      : `${changes ? `Productos: ${changes}. ` : ""}Total final: $${Math.round(out.patch.total)}. El ticket del local va con tu pedido.`;
     await db.collection("users").doc(out.order.userId).collection("notifications").add({
       title: out.allMissing ? `Pedido #${n} cancelado` : `Tu pedido #${n} cambió`,
       body: text, type: "order_update", status: "unread", url: `#/pedido/${orderRef.id}`, createdAt: new Date(),

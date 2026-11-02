@@ -1235,6 +1235,11 @@ function updateUI(order, isDriverViewOverride = false) {
   const discount = order.discount || order.discountAmount || 0;
   const totalAmount = order.totalAmount || order.total || (itemsCost + shippingFee + serviceFee - discount);
 
+  // Pedido en curso y avisos apagados: se lo decimos una vez
+  if (user && order.userId === user.uid && !['completed', 'cancelled'].includes(normalizedStatus)) {
+    import('../components/push-reminder.js').then(m => m.remindPushForOrder(order.id)).catch(() => {});
+  }
+
   // Prevent flickering: calculate fingerprint of dynamic tracking attributes
   const trackingFingerprint = JSON.stringify({
     id: order.id,

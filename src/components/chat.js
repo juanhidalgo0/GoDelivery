@@ -7,6 +7,9 @@ import { showModal, closeModal } from './modal.js';
 import { registerUnsubscribe } from '../utils/cleanup.js';
 import { icon } from '../utils/icons.js';
 import { fitToVisibleViewport, autoGrowTextarea, keepFocusOnTap } from '../utils/keyboard-fit.js';
+import { audioBubbleHtml, initAudioPlayers, analyzeWaveform } from './chat-audio.js';
+import { initReactions, reactionPillHtml } from './chat-reactions.js';
+import { goSharePlugin } from '../utils/share-receiver.js';
 
 // Guards a double tap only. It used to stay true until the modal's onClose ran, so any early
 // return in between (or a modal closed some other way) left every chat button dead until restart.
@@ -86,107 +89,6 @@ window.markAsPaid = async function(chatId, orderId, messageId) {
   }
 };
 
-window.playCustomAudio = function(btnEl) {
-  const container = btnEl.closest('.wa-audio-player');
-  if (!container) return;
-  const audio = container.querySelector('audio');
-  const seekbar = container.querySelector('.wa-audio-seek');
-  const timeDisplay = container.querySelector('.wa-audio-time');
-  const iconSpan = btnEl.querySelector('.wa-play-icon');
-  const handle = container.querySelector('.wa-waveform-handle');
-  const bars = container.querySelectorAll('.wa-waveform-bar');
-
-  if (!audio) return;
-
-  const isMine = container.closest('.chat-bubble')?.classList.contains('bubble-mine');
-  const fillClr = isMine ? 'white' : '#54656f';
-  
-  const playSvg = `<svg viewBox="0 0 24 24" width="16" height="16" fill="${fillClr}" style="display:block;"><path d="M8 5v14l11-7z"/></svg>`;
-  const pauseSvg = `<svg viewBox="0 0 24 24" width="16" height="16" fill="${fillClr}" style="display:block;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
-
-  document.querySelectorAll('audio.wa-chat-audio').forEach(a => {
-    if (a !== audio && !a.paused) {
-      a.pause();
-      const parent = a.closest('.wa-audio-player');
-      if (parent) {
-        const ic = parent.querySelector('.wa-play-icon');
-        const pIsMine = parent.closest('.chat-bubble')?.classList.contains('bubble-mine');
-        const pFill = pIsMine ? 'white' : '#54656f';
-        if (ic) ic.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="${pFill}" style="display:block;"><path d="M8 5v14l11-7z"/></svg>`;
-      }
-    }
-  });
-
-  if (audio.paused) {
-    audio.play().then(() => {
-      if (iconSpan) iconSpan.innerHTML = pauseSvg;
-    }).catch(err => console.error("Playback error:", err));
-  } else {
-    audio.pause();
-    if (iconSpan) iconSpan.innerHTML = playSvg;
-  }
-
-  const updateVisuals = () => {
-    if (audio.duration) {
-      const pct = (audio.currentTime / audio.duration) * 100;
-      if (seekbar) seekbar.value = pct;
-      if (handle) handle.style.left = `${pct}%`;
-      
-      const activeCount = Math.floor((pct / 100) * bars.length);
-      bars.forEach((bar, idx) => {
-        if (isMine) {
-          bar.style.backgroundColor = idx <= activeCount ? '#34b7f1' : 'rgba(255, 255, 255, 0.25)';
-        } else {
-          bar.style.backgroundColor = idx <= activeCount ? '#34b7f1' : '#b1b3b5';
-        }
-      });
-
-      if (timeDisplay) {
-        const curM = Math.floor(audio.currentTime / 60);
-        const curS = Math.floor(audio.currentTime % 60).toString().padStart(2, '0');
-        timeDisplay.textContent = `${curM}:${curS}`;
-      }
-    }
-  };
-
-  if (!audio._boundEvents) {
-    audio._boundEvents = true;
-    
-    audio.addEventListener('timeupdate', updateVisuals);
-
-    audio.addEventListener('loadedmetadata', () => {
-      if (timeDisplay && audio.duration) {
-        const durM = Math.floor(audio.duration / 60) || 0;
-        const durS = Math.floor(audio.duration % 60).toString().padStart(2, '0');
-        timeDisplay.textContent = `${durM}:${durS}`;
-      }
-    });
-
-    audio.addEventListener('ended', () => {
-      if (iconSpan) iconSpan.innerHTML = playSvg;
-      if (seekbar) seekbar.value = 0;
-      if (handle) handle.style.left = '0%';
-      bars.forEach(bar => {
-        bar.style.backgroundColor = isMine ? 'rgba(255, 255, 255, 0.25)' : '#b1b3b5';
-      });
-      if (timeDisplay && audio.duration) {
-        const durM = Math.floor(audio.duration / 60) || 0;
-        const durS = Math.floor(audio.duration % 60).toString().padStart(2, '0');
-        timeDisplay.textContent = `${durM}:${durS}`;
-      }
-    });
-
-    if (seekbar) {
-      seekbar.addEventListener('input', (e) => {
-        if (audio.duration) {
-          audio.currentTime = (e.target.value / 100) * audio.duration;
-          updateVisuals();
-        }
-      });
-    }
-  }
-};
-
 /**
  * Opens a chat modal for a given order.
  */
@@ -237,8 +139,11 @@ export async function openChat(options) {
   const chatRef = doc(db, 'chats', chatId);
   const messagesRef = collection(chatRef, 'messages');
 
-  // Already on screen (a banner tapped while the same chat is open): nothing to do.
-  if (document.getElementById(`chat-messages-${chatId}`)) return;
+  // Already on screen (a banner tapped while the same chat is open): nothing to do but the shared file.
+  if (document.getElementById(`chat-messages-${chatId}`)) {
+    if (options?.sharedFile) openChatLists.get(chatId)?.sendShared?.(options.sharedFile);
+    return;
+  }
 
   // Create the chat doc right away instead of after loading the order. Not awaited: offline the
   // write only resolves once the server has it, and the chat must open anyway.
@@ -277,15 +182,18 @@ export async function openChat(options) {
         <div class="chat-header-name" style="font-size: 15px; font-weight: 900; color: white; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${otherName}</div>
         <div class="chat-header-order" style="font-size: 11.5px; opacity: 0.9; font-weight: 750; color: rgba(255,255,255,0.9);">Pedido #${orderNum || '---'}</div>
       </div>
+      <a id="chat-call-${chatId}" class="chat-call-btn" aria-label="Llamar" title="Llamar" hidden>${icon('phone', 20)}</a>
       <div id="chat-status-indicator-${chatId}"></div>
     </div>
+    <div id="chat-offline-${chatId}" class="chat-offline-bar" ${navigator.onLine === false ? '' : 'hidden'}>Sin señal: tus mensajes salen solos cuando vuelva la conexión</div>
+    <div id="chat-order-strip-${chatId}"></div>
     <div class="chat-messages" id="chat-messages-${chatId}">
       <div class="chat-loading" style="padding: 100px 0;">
         <div class="loader-dots"><span></span><span></span><span></span></div>
       </div>
     </div>
     <div id="chat-typing-indicator-${chatId}" class="chat-typing-wrapper" style="display:none;"></div>
-    <div id="chat-footer-area-${chatId}">
+    <div id="chat-footer-area-${chatId}" class="chat-footer-area">
       <div id="emoji-picker-${chatId}" class="chat-emoji-picker-v2" style="display:none;">
         <div class="emoji-picker-header">
           ${Object.keys(emojiCategories).map(cat => `<button class="emoji-cat-btn" data-cat="${cat}">${cat}</button>`).join('')}
@@ -301,12 +209,16 @@ export async function openChat(options) {
           `).join('')}
         </div>
       </div>
+      <div id="chat-reply-bar-${chatId}" class="chat-reply-bar" hidden></div>
       <div class="chat-input-bar" style="position:relative; width:100%; box-sizing:border-box;">
-        <button class="chat-emoji-btn" id="emoji-btn-${chatId}">${icon('smile', 22)}</button>
-        <button class="chat-attach-btn" id="chat-attach-${chatId}" title="Adjuntar imagen" style="color:var(--color-text-secondary);">${icon('camera', 22)}</button>
-        <input type="file" id="chat-file-gallery-${chatId}" style="display:none" accept="image/*" />
+        <input type="file" id="chat-file-gallery-${chatId}" style="display:none" accept="image/*" multiple />
         <input type="file" id="chat-file-camera-${chatId}" style="display:none" accept="image/*" capture="environment" />
-        <textarea id="chat-input-${chatId}" class="chat-input" rows="1" placeholder="Escribí un mensaje..." autocomplete="off" enterkeyhint="send"></textarea>
+        <div class="chat-input-pill">
+          <button class="chat-emoji-btn" id="emoji-btn-${chatId}" aria-label="Emojis">${icon('smile', 22)}</button>
+          <textarea id="chat-input-${chatId}" class="chat-input" rows="1" placeholder="Escribí un mensaje..." autocomplete="off" enterkeyhint="send"></textarea>
+          <button class="chat-more-btn" id="chat-more-${chatId}" aria-label="Ubicación o producto">${icon('paperclip', 21)}</button>
+          <button class="chat-attach-btn" id="chat-attach-${chatId}" aria-label="Enviar foto">${icon('camera', 22)}</button>
+        </div>
         
         <div id="chat-audio-indicator-${chatId}" style="display:none; position:absolute; inset:0; background:var(--color-surface); align-items:center; justify-content:space-between; padding:0 16px; border-radius:18px; z-index:50; border:1.5px solid var(--color-border);">
           <div style="display:flex; align-items:center; gap:8px;">
@@ -318,14 +230,19 @@ export async function openChat(options) {
           </div>
         </div>
 
-        <button class="chat-mic-btn" id="chat-mic-${chatId}" title="Grabar audio" style="color:var(--color-primary); z-index:60; position:relative; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;">${icon('mic', 22)}</button>
+        <button class="chat-mic-btn" id="chat-mic-${chatId}" aria-label="Grabar audio" style="z-index:60; position:relative; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;">${icon('mic', 22)}</button>
         <button class="chat-send-btn" id="chat-send-${chatId}" style="z-index:60; position:relative;">${icon('send', 20)}</button>
       </div>
     </div>
   `;
 
   let stopKeyboardFit = () => {};
+  let stopAudio = () => {};
+  let stopOfflineBar = () => {};
   let chatClosed = false;
+  let latestMessages = [];
+  const pendingUploads = [];
+  const renderOptions = { chatId, orderId, chatType: type, isAudit, canMarkPaid: senderDisplayName === 'Comercio' };
   let retryTimer = null;
 
   const modalInstance = showModal({
@@ -343,6 +260,11 @@ export async function openChat(options) {
       if (orderUnsub) orderUnsub();
       if (chatDocUnsub) chatDocUnsub();
       if (otherUserUnsub) otherUserUnsub();
+      stopAudio();
+      stopOfflineBar();
+      openChatLists.delete(chatId);
+      updateRecordingStatus(chatRef, user.uid, false);
+      document.querySelector('.chat-rx-layer')?.remove();
       stopKeyboardFit();
       updateTypingStatus(chatRef, user.uid, false);
     }
@@ -359,7 +281,45 @@ export async function openChat(options) {
   }
 
   // Setup input listeners IMMEDIATELY (0ms) on DOM insertion so input doesn't wait for network
-  setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayName);
+  const refreshList = () => renderMessages(messagesContainer, latestMessages, user.uid, renderOptions, pendingUploads);
+  const listState = { pendingUploads, refreshList, messagesContainer, orderId };
+  setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayName, listState);
+  openChatLists.set(chatId, listState);
+  if (options?.sharedFile) listState.sendShared?.(options.sharedFile);
+
+  const paintOffline = () => {
+    const bar = document.getElementById(`chat-offline-${chatId}`);
+    if (bar) bar.hidden = navigator.onLine !== false;
+  };
+  window.addEventListener('online', paintOffline);
+  window.addEventListener('offline', paintOffline);
+  stopOfflineBar = () => {
+    window.removeEventListener('online', paintOffline);
+    window.removeEventListener('offline', paintOffline);
+  };
+
+  stopAudio = initAudioPlayers(messagesContainer, {
+    onPlayed: (id) => { if (!isAudit) updateDoc(doc(messagesRef, id), { played: true }).catch(() => {}); },
+  });
+  initReactions(messagesContainer, {
+    uid: user.uid,
+    messagesRef,
+    getMessage: (id) => latestMessages.find(m => m.id === id && !m.deleted),
+    isLocked: () => isAudit || !!document.getElementById(`chat-footer-area-${chatId}`)?.querySelector('.chat-closed-bar'),
+    moreEmojis: [...new Set(Object.values(emojiCategories).flat())],
+    onReply: (msg) => listState.startReply?.(msg),
+    // No se borra: el texto queda para el admin (el chat sirve de registro ante un reclamo)
+    onDelete: async (msg) => {
+      try {
+        await updateDoc(doc(messagesRef, msg.id), { deleted: true, deletedAt: serverTimestamp() });
+        if (latestMessages[latestMessages.length - 1]?.id === msg.id) await updateDoc(chatRef, { lastMessage: '🚫 Mensaje eliminado' });
+      } catch (err) {
+        console.warn('[chat] delete', err);
+        const { showToast } = await import('./toast.js');
+        showToast('No se pudo eliminar. Revisá tu conexión.', 'warning');
+      }
+    },
+  });
 
   // Con el teclado abierto el cuadro de texto queda siempre justo arriba (ver utils/keyboard-fit.js)
   stopKeyboardFit = fitToVisibleViewport(chatContainer, messagesContainer);
@@ -385,12 +345,12 @@ export async function openChat(options) {
   };
   const listenToMessages = () => {
     if (unsub) unsub();
-    unsub = onSnapshot(q, onMessagesSnapshot, onMessagesError);
+    unsub = onSnapshot(q, { includeMetadataChanges: true }, onMessagesSnapshot, onMessagesError);
     registerUnsubscribe(unsub);
   };
   const onMessagesSnapshot = (snap) => {
     listenAttempts = 0;
-    const messages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    latestMessages = snap.docs.map(d => ({ id: d.id, ...d.data(), pendingWrite: d.metadata?.hasPendingWrites === true }));
 
     // Play sound for incoming message
     if (!isInitialLoad && snap.docChanges().length > 0) {
@@ -407,8 +367,7 @@ export async function openChat(options) {
     }
     isInitialLoad = false;
 
-    renderMessages(messagesContainer, messages, user.uid, { chatId, orderId, chatType: type, isAudit, canMarkPaid: senderDisplayName === 'Comercio' });
-    initReactionListeners(messagesContainer, user, messagesRef, chatId);
+    refreshList();
 
     // Mark unread messages as read (not when an admin is only auditing: that would mark them
     // seen for the real recipient)
@@ -490,11 +449,36 @@ export async function openChat(options) {
           nameEl.textContent = headerTitle;
         }
 
+        listState.refreshCall = (o) => showCall('', o);
+        const paintStrip = (o) => renderOrderStrip(chatId, o, { user, type, isAudit, list: listState });
+        paintStrip(orderData);
+
+        // Llamar a la otra parte, mientras el pedido esté en curso
+        let lastPhone = '';
+        const showCall = (rawPhone, current = orderData) => {
+          const phone = String(rawPhone || lastPhone || '').replace(/[^\d+]/g, '');
+          lastPhone = phone;
+          const callBtn = document.getElementById(`chat-call-${chatId}`);
+          if (!callBtn || !phone || isReadOnly) return;
+          // El cliente no llama al repartidor: se escriben por acá (cuida su número)
+          if (type === 'client-delivery' && user.uid === current.userId) return;
+          callBtn.href = `tel:${phone}`;
+          callBtn.hidden = false;
+        };
+        const clientPhone = orderData.userPhone || orderData.clientPhone || orderData.phone;
+        const iAmClient = user.uid === orderData.userId;
+        const iAmDriver = user.uid === orderData.driverId;
+        if (type === 'client-delivery') showCall(iAmClient ? orderData.driverPhone : clientPhone);
+        else if (type === 'client-commerce') showCall(iAmClient ? orderData.comercioPhone : clientPhone);
+        else if (type === 'commerce-delivery') showCall(iAmDriver ? orderData.comercioPhone : orderData.driverPhone);
+
         if (otherId) {
           otherUserUnsub = onSnapshot(doc(db, 'users', otherId), async (uSnap) => {
             if (uSnap.exists()) {
               const uData = uSnap.data();
               let photo = uData.photoURL || uData.profilePhoto || null;
+              // El pedido no siempre trae el teléfono de la otra parte
+              if (document.getElementById(`chat-call-${chatId}`)?.hidden) showCall(uData.phone || uData.phoneNumber);
               
               const isCommerceParty = (type === 'client-commerce' && otherId === orderData.comercioId) ||
                                       (type === 'commerce-delivery' && otherId === orderData.comercioId);
@@ -529,6 +513,8 @@ export async function openChat(options) {
           registerUnsubscribe(otherUserUnsub);
         }
 
+        if (!isReadOnly && type === 'client-delivery' && orderData.driverId === user.uid) showQuickReplies(chatId, stripIsTransfer(orderData));
+
         // 2. Add every party of the chat, so each one sees it in their list and gets the
         // in-app alert (not awaited: offline it would hold up the rest of the setup)
         if (!isAudit) {
@@ -562,6 +548,8 @@ export async function openChat(options) {
       if (!isReadOnly) {
         orderUnsub = onSnapshot(doc(db, 'orders', orderId), (snap) => {
           if (!snap.exists()) return;
+          renderOrderStrip(chatId, snap.data(), { user, type, isAudit, list: listState });
+          listState.refreshCall?.(snap.data());
           const newStatus = snap.data().status;
           if (newStatus === 'completed' || newStatus === 'cancelled') {
             const footerArea = document.getElementById(`chat-footer-area-${chatId}`);
@@ -589,7 +577,9 @@ export async function openChat(options) {
             otherIsTyping = true;
           }
         });
-        showTypingIndicator(chatId, otherIsTyping, otherName);
+        const otherIsRecording = Object.entries(data.recording || {}).some(([uid, on]) => uid !== user.uid && on);
+        const whoIsThere = chatContainer.querySelector('.chat-header-name')?.childNodes[0]?.textContent || otherName;
+        showTypingIndicator(chatId, otherIsTyping || otherIsRecording, whoIsThere, otherIsRecording ? 'está grabando un audio' : 'está escribiendo');
       }, err => console.warn('[chat] typing listener error:', err?.code || err));
       registerUnsubscribe(chatDocUnsub);
     } catch (e) {
@@ -599,11 +589,36 @@ export async function openChat(options) {
 
   // Delegated listener for Lightbox
   messagesContainer.addEventListener('click', (e) => {
+    const quote = e.target.closest('.chat-quote');
+    if (quote) {
+      const target = messagesContainer.querySelector(`[data-msg-id="${CSS.escape(quote.dataset.replyTo)}"]`);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.add('chat-flash');
+        setTimeout(() => target.classList.remove('chat-flash'), 1200);
+      }
+      return;
+    }
     const imgContainer = e.target.closest('.chat-image-container');
-    if (imgContainer && imgContainer.dataset.url && imgContainer.dataset.url !== 'undefined') {
+    if (imgContainer?.classList.contains('has-failed')) {
+      const img = imgContainer.querySelector('img');
+      imgContainer.classList.remove('has-failed');
+      if (img) img.src = imgContainer.dataset.url;
+      return;
+    }
+    if (imgContainer && !imgContainer.classList.contains('is-pending') && imgContainer.dataset.url && imgContainer.dataset.url !== 'undefined') {
       window.openLightbox(imgContainer.dataset.url);
     }
   });
+}
+
+// Lo que más escribe un repartidor, a un toque (va en moto)
+const QUICK_REPLIES = ['Ya llegué 👋', 'Estoy en camino 🛵', 'Estoy afuera', 'No hay este producto', '¿Te llevo otro parecido?', '¿Me pasás la altura exacta?'];
+
+function showQuickReplies(chatId, isTransfer = false) {
+  const bar = document.getElementById(`chat-footer-area-${chatId}`)?.querySelector('.chat-input-bar');
+  if (!bar || bar.previousElementSibling?.classList.contains('chat-quick-replies')) return;
+  bar.insertAdjacentHTML('beforebegin', `<div class="chat-quick-replies">${(isTransfer ? ['¿Me mandás el comprobante?', ...QUICK_REPLIES] : QUICK_REPLIES).map(t => `<button type="button" class="quick-pill-btn">${t}</button>`).join('')}</div>`);
 }
 
 // Chat list preview + per-person unread counters. The push and the in-app notification for the
@@ -643,7 +658,55 @@ async function updateChatMetadata(chatRef, uid, lastMessageText) {
   }
 }
 
-function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayName) {
+const openChatLists = new Map();
+const MAX_IMAGES_AT_ONCE = 5;
+const IMAGE_MAX_SIDE = 1600;
+const localImagePreviews = new Map();
+
+// Foto lista para mandar: como mucho 1600 px, y una miniatura mínima que se ve mientras baja la
+// original (con sus medidas la burbuja ya tiene su tamaño y la lista no salta). Si el celular no
+// puede abrirla (formato raro), va tal cual.
+async function prepareChatImage(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = reject;
+      el.src = url;
+    });
+    const w = img.naturalWidth, h = img.naturalHeight;
+    const draw = (side, quality) => new Promise((resolve) => {
+      const k = Math.min(1, side / Math.max(w, h));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(w * k));
+      c.height = Math.max(1, Math.round(h * k));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob(resolve, 'image/jpeg', quality);
+    });
+    const [big, small] = await Promise.all([draw(IMAGE_MAX_SIDE, 0.82), draw(24, 0.5)]);
+    const thumb = small ? await new Promise((resolve) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => resolve(null);
+      r.readAsDataURL(small);
+    }) : null;
+    const k = Math.min(1, IMAGE_MAX_SIDE / Math.max(w, h));
+    const useBig = big && (big.size < file.size || k < 1 || file.type !== 'image/jpeg');
+    return {
+      file: useBig ? new File([big], 'foto.jpg', { type: 'image/jpeg' }) : file,
+      width: Math.round(w * k),
+      height: Math.round(h * k),
+      thumb,
+    };
+  } catch (e) {
+    return { file, width: 0, height: 0, thumb: null };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayName, list) {
   const input = document.getElementById(`chat-input-${chatId}`);
   const sendBtn = document.getElementById(`chat-send-${chatId}`);
   const fileInputGallery = document.getElementById(`chat-file-gallery-${chatId}`);
@@ -672,6 +735,7 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
   let currentDeltaX = 0;
 
   const resetRecordingUI = () => {
+    if (isRecording) updateRecordingStatus(chatRef, user.uid, false);
     isRecording = false;
     isPendingPermission = false;
     currentDeltaX = 0;
@@ -747,6 +811,7 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
       mediaRecorder.onstart = () => {
         isPendingPermission = false;
         isRecording = true;
+        updateRecordingStatus(chatRef, user.uid, true);
         recordStartTime = Date.now();
         if (audioIndicator) audioIndicator.style.display = 'flex';
         if (audioTimer) audioTimer.textContent = '0:00';
@@ -786,7 +851,9 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
              const storageRef = ref(storage, fileName);
              const audioBlob = new Blob(recordedChunks, { type: finalMime });
              
-             await uploadBytes(storageRef, audioBlob);
+             // La forma del audio no vale la demora: si tarda, va sin ella
+             const waveform = await Promise.race([analyzeWaveform(audioBlob), new Promise(r => setTimeout(() => r(null), 1500))]);
+             await uploadBytes(storageRef, audioBlob, { contentType: finalMime.split(';')[0] });
              const downloadURL = await getDownloadURL(storageRef);
              
               await addDoc(messagesRef, {
@@ -796,6 +863,9 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
                  text: 'Mensaje de voz',
                  type: 'audio',
                  audioUrl: downloadURL,
+                 duration: Math.round(elapsedMs / 1000),
+                 ...takeReply(),
+                 ...(waveform ? { waveform } : {}),
                  timestamp: serverTimestamp(),
                  read: false
               });
@@ -950,7 +1020,7 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
     const s = document.createElement('style');
     s.id = 'chat-v2-styles';
     s.textContent = `
-      .chat-emoji-picker-v2 { position: absolute; bottom: 125px; left: 16px; right: 16px; height: 320px; background: var(--glass-bg); backdrop-filter: var(--glass-blur); border-radius: 24px; border: 1px solid var(--glass-border); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; z-index: 1000; animation: emoji-slide-up 0.3s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
+      .chat-emoji-picker-v2 { position: absolute; bottom: calc(100% + 8px); left: 10px; right: 10px; height: 320px; background: var(--glass-bg); backdrop-filter: var(--glass-blur); border-radius: 24px; border: 1px solid var(--glass-border); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; z-index: 1000; animation: emoji-slide-up 0.3s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
       .emoji-picker-header { display: flex; gap: 8px; padding: 12px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--color-border-light); background: rgba(255,255,255,0.2); }
       .emoji-picker-header::-webkit-scrollbar { display: none; }
       .emoji-cat-btn { background: var(--color-surface); border: 1px solid var(--color-border-light); padding: 6px 14px; border-radius: 100px; font-size: 11px; font-weight: 800; color: var(--color-text-secondary); cursor: pointer; white-space: nowrap; }
@@ -1044,12 +1114,127 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
   // Do not auto-focus input on chat open so virtual keyboard stays closed
 
   const displayName = senderDisplayName || user.displayName || 'Usuario';
+
+  // Responder a un mensaje: queda arriba del cuadro hasta mandar el próximo
+  let replyTo = null;
+  const replyBar = document.getElementById(`chat-reply-bar-${chatId}`);
+  const showReply = () => {
+    if (!replyBar) return;
+    replyBar.hidden = !replyTo;
+    replyBar.innerHTML = replyTo ? `
+      <div class="chat-reply-text"><b>${escapeHtml(replyTo.senderName || 'Mensaje')}</b><span>${escapeHtml(replyTo.preview)}</span></div>
+      <button type="button" class="chat-reply-close" aria-label="Cancelar respuesta">${icon('close', 16)}</button>` : '';
+  };
+  list.startReply = (msg) => {
+    replyTo = { id: msg.id, senderName: msg.senderName || '', preview: messagePreview(msg).slice(0, 120) };
+    showReply();
+    input?.focus();
+  };
+  const takeReply = () => {
+    const r = replyTo;
+    replyTo = null;
+    showReply();
+    return r ? { replyTo: r } : {};
+  };
+  replyBar?.addEventListener('click', (e) => {
+    if (e.target.closest('.chat-reply-close')) { replyTo = null; showReply(); }
+  });
+  input.closest('.chat-footer-area')?.addEventListener('click', (e) => {
+    const quick = e.target.closest('.quick-pill-btn');
+    if (!quick) return;
+    input.value = quick.textContent;
+    sendBtn.click();
+  });
+
+  const sendSpecial = async (fields, preview) => {
+    if (isChatClosed()) return;
+    try {
+      await addDoc(messagesRef, {
+        senderId: user.uid,
+        senderName: displayName,
+        senderPhoto: user.photoURL || user.profilePhoto || null,
+        timestamp: serverTimestamp(),
+        read: false,
+        ...takeReply(),
+        ...fields,
+      });
+      await updateChatMetadata(chatRef, user.uid, preview);
+    } catch (err) {
+      console.error('Error sending message:', err);
+      import('./toast.js').then(m => m.showToast('No se pudo enviar. Probá de nuevo.', 'error'));
+    }
+  };
+
+  const shareLocation = async () => {
+    const { showToast } = await import('./toast.js');
+    showToast('Buscando tu ubicación…', 'info');
+    try {
+      const options = { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 };
+      const isNative = window.Capacitor?.getPlatform && window.Capacitor.getPlatform() !== 'web';
+      const read = isNative
+        ? import('@capacitor/geolocation').then(m => m.Geolocation.getCurrentPosition(options))
+        : new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, options));
+      // El WebView a veces nunca responde: con tope propio (ver "Iniciar Jornada")
+      const pos = await Promise.race([read, new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 12000))]);
+      await sendSpecial({ type: 'location', text: '📍 Ubicación', lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy || 0) }, '📍 Ubicación');
+    } catch (err) {
+      showToast('No pudimos leer tu ubicación. Revisá el permiso y el GPS.', 'warning');
+    }
+  };
+
+  const pickProduct = async () => {
+    const { showToast } = await import('./toast.js');
+    let items = [];
+    try {
+      const snap = await getDoc(doc(db, 'orders', list.orderId));
+      items = (snap.data()?.items || []).filter(i => i.name && Number(i.qty ?? 1) > 0);
+    } catch (err) { /* sin datos: se avisa abajo */ }
+    if (!items.length) { showToast('Este pedido no tiene productos para elegir.', 'info'); return; }
+    showModal({
+      title: 'Elegí un producto',
+      height: 'auto',
+      content: `<div class="chat-product-list" style="padding-bottom:calc(16px + env(safe-area-inset-bottom));">${items.map((it, i) => `
+        <button type="button" class="chat-product-row" data-i="${i}">
+          ${it.image ? `<img src="${escapeHtml(it.image)}" alt="" loading="lazy">` : `<span class="chat-product-noimg">${icon('shoppingBag', 20)}</span>`}
+          <span>${escapeHtml(it.name)}</span>
+        </button>`).join('')}</div>`,
+      onOpen: () => {
+        document.querySelectorAll('.chat-product-row').forEach(btn => {
+          btn.onclick = () => {
+            const it = items[Number(btn.dataset.i)];
+            closeModal();
+            sendSpecial({
+              type: 'product',
+              text: `🛒 ${it.name}`,
+              product: { name: it.name, image: it.image || null, price: Number(it.price) || 0 },
+            }, `🛒 ${it.name}`);
+          };
+        });
+      },
+    });
+  };
   // Only this chat's footer counts: another chat closing on screen must not block this one.
   const isChatClosed = () => !!document.getElementById(`chat-footer-area-${chatId}`)?.querySelector('.chat-closed-bar');
 
+  document.getElementById(`chat-more-${chatId}`)?.addEventListener('click', () => {
+    const row = (id, name, label) => `<button id="${id}" class="chat-more-option">${icon(name, 20)} ${label}</button>`;
+    showModal({
+      title: 'Enviar',
+      height: 'auto',
+      content: `<div class="chat-more-sheet" style="padding-bottom:calc(20px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px)));">
+        ${row(`btn-use-location-${chatId}`, 'mapPin', 'Mi ubicación')}
+        ${row(`btn-use-product-${chatId}`, 'shoppingBag', 'Producto del pedido')}
+      </div>`,
+      onOpen: () => {
+        document.getElementById(`btn-use-location-${chatId}`).onclick = () => { closeModal(); shareLocation(); };
+        document.getElementById(`btn-use-product-${chatId}`).onclick = () => { closeModal(); pickProduct(); };
+      },
+    });
+  });
+
   attachBtn?.addEventListener('click', () => {
     showModal({
-      title: 'Enviar imagen',
+      title: 'Enviar foto',
       content: `
         <div style="padding: 24px 20px calc(24px + max(var(--safe-area-inset-bottom, 0px), env(safe-area-inset-bottom, 0px))) 20px; display: flex; flex-direction: column; gap: 16px;">
           <button id="btn-use-camera-${chatId}" style="width: 100%; height: 56px; border-radius: 18px; background: var(--color-primary); color: white; border: none; font-weight: 850; font-size: 15px; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.25);">
@@ -1081,11 +1266,12 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
                 const response = await fetch(photo.webPath);
                 const blob = await response.blob();
                 const file = new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' });
-                handleFileSelect(file);
+                askCaption(file);
               } else {
                 fileInputCamera?.click();
               }
             } catch (err) {
+              if (/cancel/i.test(err?.message || '')) return;
               console.warn("Capacitor camera error, falling back to input file click", err);
               fileInputCamera?.click();
             }
@@ -1101,115 +1287,160 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
     });
   });
 
-  const compressImage = async (file, maxDimension = 1280, quality = 0.8) => {
-    return new Promise((resolve) => {
-      if (!file || !file.type || !file.type.startsWith('image/')) {
-        resolve(file);
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          let width = img.width;
-          let height = img.height;
-          if (width <= maxDimension && height <= maxDimension) {
-            resolve(file);
-            return;
-          }
-          if (width > height) {
-            height = Math.round((height * maxDimension) / width);
-            width = maxDimension;
-          } else {
-            width = Math.round((width * maxDimension) / height);
-            height = maxDimension;
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, width, height);
-          canvas.toBlob(
-            (blob) => {
-              if (blob && blob.size < file.size) {
-                const compressed = new File([blob], file.name.replace(/\.[^/.]+$/, '.jpg'), {
-                  type: 'image/jpeg',
-                  lastModified: Date.now()
-                });
-                resolve(compressed);
-              } else {
-                resolve(file);
-              }
-            },
-            'image/jpeg',
-            quality
-          );
+  // La foto se ve al instante con su avance; el mensaje recién se crea cuando ya está subida, así la
+  // otra persona no recibe un aviso de una foto que todavía no puede ver.
+  const setUploadProgress = (id, pct) => {
+    const el = list.messagesContainer.querySelector(`[data-upload-id="${id}"]`);
+    if (!el) return;
+    const label = el.querySelector('.chat-upload-pct');
+    if (label) label.textContent = `${pct}%`;
+    el.querySelector('.chat-upload-ring')?.style.setProperty('--pct', pct);
+  };
+
+  const uploadImage = async (item) => {
+    item.status = 'uploading';
+    item.progress = 0;
+    list.refreshList();
+    try {
+      const { ref, uploadBytesResumable, getDownloadURL } = await import('firebase/storage');
+      const { storage } = await import('../firebase.js');
+      const fileRef = ref(storage, `chats/${chatId}/${Date.now()}_${item.id}.${item.isPdf ? 'pdf' : 'jpg'}`);
+      const task = uploadBytesResumable(fileRef, item.prepared.file, { contentType: item.prepared.file.type || 'image/jpeg' });
+      await new Promise((resolve, reject) => {
+        task.on('state_changed', (snap) => {
+          item.progress = snap.totalBytes ? Math.round((snap.bytesTransferred / snap.totalBytes) * 100) : 0;
+          setUploadProgress(item.id, item.progress);
+        }, reject, resolve);
+      });
+      const url = await getDownloadURL(fileRef);
+      // Quien la mandó sigue viendo la copia del celular: no se vuelve a bajar lo que ya tiene
+      if (!item.isPdf) localImagePreviews.set(url, item.previewUrl);
+      await addDoc(messagesRef, {
+        senderId: user.uid,
+        senderName: displayName,
+        senderPhoto: user.photoURL || user.profilePhoto || null,
+        text: item.isPdf ? `📄 ${item.fileName}` : '',
+        type: item.isPdf ? 'file' : 'image',
+        status: 'ready',
+        ...(item.isPdf ? { fileUrl: url, fileName: item.fileName } : { imageUrl: url }),
+        ...(item.prepared.width ? { width: item.prepared.width, height: item.prepared.height } : {}),
+        ...(item.prepared.thumb ? { thumb: item.prepared.thumb } : {}),
+        ...(item.caption ? { caption: item.caption } : {}),
+        ...(item.viaShare ? { viaShare: true } : {}),
+        ...item.reply,
+        timestamp: serverTimestamp(),
+        read: false,
+      });
+      list.pendingUploads.splice(list.pendingUploads.indexOf(item), 1);
+      list.refreshList();
+      await updateChatMetadata(chatRef, user.uid, item.isPdf ? `📄 ${item.fileName}` : (item.caption ? `📷 ${item.caption}` : '📷 Foto'));
+    } catch (err) {
+      console.error('Upload error:', err);
+      item.status = 'error';
+      list.refreshList();
+    }
+  };
+
+  // Una foto: se ve antes de mandarla y se le puede escribir algo
+  const askCaption = (file) => {
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    let sent = false;
+    showModal({
+      title: 'Enviar foto',
+      height: 'auto',
+      content: `
+        <div class="chat-caption-sheet" style="padding-bottom:calc(16px + env(safe-area-inset-bottom));">
+          <img src="${url}" alt="">
+          <div class="chat-caption-row">
+            <input type="text" id="chat-caption-${chatId}" class="chat-caption-input" placeholder="Agregá un comentario…" maxlength="500" enterkeyhint="send">
+            <button type="button" id="chat-caption-send-${chatId}" class="chat-caption-send" aria-label="Enviar">${icon('send', 20)}</button>
+          </div>
+        </div>`,
+      onClose: () => { if (!sent) URL.revokeObjectURL(url); },
+      onOpen: () => {
+        const field = document.getElementById(`chat-caption-${chatId}`);
+        const go = () => {
+          if (sent) return;
+          sent = true;
+          const caption = field.value.trim();
+          closeModal();
+          handleFileSelect(file, caption);
         };
-        img.onerror = () => resolve(file);
-        img.src = e.target.result;
-      };
-      reader.onerror = () => resolve(file);
-      reader.readAsDataURL(file);
+        document.getElementById(`chat-caption-send-${chatId}`).onclick = go;
+        field.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+      },
     });
   };
 
-  const handleFileSelect = async (rawFile) => {
+  const handleFileSelect = async (rawFile, caption = '', viaShare = false) => {
     if (!rawFile) return;
     if (isChatClosed()) {
       import('./toast.js').then(m => m.showToast('El chat ha finalizado. No podés enviar mensajes.', 'warning'));
       return;
     }
-
-    const file = await compressImage(rawFile);
-
-    const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
-    const { storage } = await import('../firebase.js');
-
     import('../utils/audio-manager.js').then(m => {
       m.AudioManager.playSynthMessageSend();
     });
-
-    const docRef = await addDoc(messagesRef, {
-      senderId: user.uid,
-      senderName: displayName,
-      senderPhoto: user.photoURL || user.profilePhoto || null,
-      text: 'Subiendo imagen...',
-      type: 'image',
-      status: 'uploading',
-      timestamp: serverTimestamp(),
-      read: false,
-    });
-
-    try {
-      const fileRef = ref(storage, `chats/${chatId}/${Date.now()}_${file.name}`);
-      const metadata = { contentType: file.type || 'image/jpeg' };
-      await uploadBytes(fileRef, file, metadata);
-      const url = await getDownloadURL(fileRef);
-
-      await updateDoc(docRef, {
-        text: '',
-        imageUrl: url,
-        status: 'ready',
-      });
-
-      await updateChatMetadata(chatRef, user.uid, '📷 Imagen');
-    } catch (err) {
-      console.error('Upload error:', err);
-      await updateDoc(docRef, { text: 'Error al subir imagen', status: 'error' });
-    }
+    const item = {
+      id: `u${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      previewUrl: URL.createObjectURL(rawFile),
+      isPdf: rawFile.type === 'application/pdf',
+      fileName: String(rawFile.name || 'comprobante.pdf').slice(0, 120),
+      status: 'preparing',
+      progress: 0,
+      caption,
+      viaShare,
+      reply: takeReply(),
+    };
+    list.pendingUploads.push(item);
+    list.refreshList();
+    item.isPdf = rawFile.type === 'application/pdf';
+    item.fileName = String(rawFile.name || 'comprobante.pdf').slice(0, 120);
+    item.prepared = item.isPdf ? { file: rawFile } : await prepareChatImage(rawFile);
+    item.width = item.prepared.width;
+    item.height = item.prepared.height;
+    await uploadImage(item);
   };
 
+  list.messagesContainer.addEventListener('click', (e) => {
+    const box = e.target.closest('[data-upload-id]');
+    if (!box) return;
+    const item = list.pendingUploads.find(u => u.id === box.dataset.uploadId);
+    if (!item || item.status !== 'error') return;
+    if (e.target.closest('.chat-upload-discard')) {
+      list.pendingUploads.splice(list.pendingUploads.indexOf(item), 1);
+      URL.revokeObjectURL(item.previewUrl);
+      list.refreshList();
+    } else if (e.target.closest('.chat-upload-retry')) {
+      uploadImage(item);
+    }
+  });
+
   // The picker sheet was already closed by its own buttons; closing again here closed the chat.
-  fileInputGallery?.addEventListener('change', (e) => {
-    handleFileSelect(e.target.files[0]);
+  let receiptNext = false;
+  const RECEIPT_CAPTION = '🧾 Comprobante de transferencia';
+  list.pickReceipt = () => {
+    receiptNext = true;
+    if (fileInputGallery) fileInputGallery.accept = 'image/*,application/pdf';
+    fileInputGallery?.click();
+  };
+  // Lo que llega compartido desde otra app (src/utils/share-receiver.js)
+  list.sendShared = (file) => handleFileSelect(file, RECEIPT_CAPTION, true);
+  const onFilesPicked = (e) => {
+    const files = Array.from(e.target.files || []).slice(0, MAX_IMAGES_AT_ONCE);
     e.target.value = '';
-  });
-
-  fileInputCamera?.addEventListener('change', (e) => {
-    handleFileSelect(e.target.files[0]);
-    e.target.value = '';
-  });
-
+    if (receiptNext) {
+      receiptNext = false;
+      if (fileInputGallery) fileInputGallery.accept = 'image/*';
+      if (files[0]) handleFileSelect(files[0], RECEIPT_CAPTION);
+      return;
+    }
+    if (files.length === 1) askCaption(files[0]);
+    else files.forEach(f => handleFileSelect(f));
+  };
+  fileInputGallery?.addEventListener('change', onFilesPicked);
+  fileInputCamera?.addEventListener('change', onFilesPicked);
 
   // El cuadro crece con el texto (antes era de una sola línea y un mensaje largo se corría hacia el
   // costado sin que se viera lo escrito), y tocar enviar no cierra el teclado.
@@ -1237,6 +1468,7 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
     input.value = '';
     autoGrow();
     input.focus();
+    const reply = takeReply();
 
     import('../utils/audio-manager.js').then(m => {
       m.AudioManager.playSynthMessageSend();
@@ -1254,6 +1486,7 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
         type: 'text',
         timestamp: serverTimestamp(),
         read: false,
+        ...reply,
       });
 
       await updateChatMetadata(chatRef, user.uid, text);
@@ -1273,13 +1506,119 @@ function setupInputListeners(chatId, messagesRef, user, chatRef, senderDisplayNa
   });
 }
 
-function renderMessages(container, messages, currentUserId, { chatId, orderId, chatType, isAudit = false, canMarkPaid = false } = {}) {
-  if (messages.length === 0) {
+// Las medidas de la foto, con un límite para que una muy larga no ocupe toda la pantalla
+const imageRatio = (w, h) => (w > 0 && h > 0 ? Math.max(0.62, Math.min(1.6, w / h)) : 1);
+
+// Cómo compartir el comprobante: el paso 3 cambia porque en iPhone hay que volver a abrir GO!
+function showShareHelp() {
+  const iPhone = window.Capacitor?.getPlatform?.() === 'ios';
+  const steps = [
+    ['copy', 'Copiá el alias y transferí', 'Desde Mercado Pago o tu billetera.'],
+    ['send', 'Tocá Compartir en el comprobante', 'Es el botón que aparece al terminar la transferencia.'],
+    ['check', iPhone ? 'Elegí GO! y volvé a abrir la app' : 'Elegí GO!', iPhone ? 'Se manda solo al chat de tu pedido. Si no lo ves, tocá Más en la lista.' : 'Se manda solo al chat de tu pedido.'],
+  ];
+  showModal({
+    title: 'Mandar el comprobante',
+    height: 'auto',
+    content: `<div class="chat-share-help" style="padding-bottom:calc(20px + env(safe-area-inset-bottom));">${steps.map(([name, title, sub], i) => `
+      <div class="chat-share-step"><span>${i + 1}</span><div><b>${title}</b><small>${sub}</small></div>${icon(name, 20)}</div>`).join('')}</div>`,
+  });
+}
+
+const stripMoney = (n) => `$ ${Math.round(Number(n) || 0).toLocaleString('es-AR')}`;
+const stripIsTransfer = (o) => { const pm = String(o.paymentMethod || '').toLowerCase(); return pm === 'mercadopago' || pm.includes('transf'); };
+
+// Arriba de la conversación: qué se pidió y cuánto es, sin salir del chat. Al cliente que paga con
+// transferencia, además el alias y el monto para copiar y mandar el comprobante acá mismo.
+function renderOrderStrip(chatId, order, { user, type, isAudit, list }) {
+  const box = document.getElementById(`chat-order-strip-${chatId}`);
+  if (!box) return;
+  const items = (Array.isArray(order.items) ? order.items : []).filter(i => Number(i.qty ?? i.quantity ?? 1) > 0);
+  const finished = ['completed', 'delivered', 'cancelled'].includes(order.status);
+  const pay = stripIsTransfer(order) ? 'Transferencia' : 'Efectivo';
+  const qty = items.reduce((sum, i) => sum + (Number(i.qty ?? i.quantity) || 1), 0);
+  const what = qty ? `${qty} producto${qty === 1 ? '' : 's'}` : (order.isTrip ? 'Viaje' : 'Mandado');
+  const total = Number(order.totalAmount || order.total) || 0;
+  const list_ = items.length
+    ? items.map(i => `
+        <div class="chat-strip-item">
+          ${i.image ? `<img src="${escapeHtml(i.image)}" alt="" loading="lazy">` : ''}
+          <span>${escapeHtml(i.qty ?? i.quantity ?? 1)} × ${escapeHtml(i.name || i.title || 'Producto')}</span>
+          <b>${stripMoney((Number(i.price) || 0) * (Number(i.qty ?? i.quantity) || 1))}</b>
+        </div>`).join('')
+    : `<div class="chat-strip-item"><span>${escapeHtml(order.details || order.description || 'Sin detalle')}</span></div>`;
+  const showPay = !isAudit && !finished && type === 'client-delivery' && user.uid === order.userId && stripIsTransfer(order) && order.driverAlias;
+  const html = `
+    <details class="chat-order-strip">
+      <summary>
+        <span>${what}${total ? ` · ${stripMoney(total)}` : ''} · ${pay}</span>
+        ${icon('chevronDown', 18)}
+      </summary>
+      <div class="chat-strip-list">${list_}</div>
+    </details>
+    ${showPay ? `
+      <div class="chat-pay-card">
+        <div><small>Transferí ${stripMoney(total)} al alias</small><b>${escapeHtml(order.driverAlias)}</b></div>
+        <button type="button" class="chat-pay-copy" data-alias="${escapeHtml(order.driverAlias)}">${icon('copy', 15)} Copiar</button>
+        <button type="button" class="chat-pay-receipt">${icon('image', 15)} Comprobante</button>
+        ${goSharePlugin() ? `<button type="button" class="chat-pay-how">¿Ya transferiste? Compartilo desde tu billetera eligiendo <b>GO!</b> <u>Ver cómo</u></button>` : ''}
+      </div>` : ''}`;
+  if (box.dataset.html === html) return;
+  const wasOpen = box.querySelector('details')?.open;
+  box.dataset.html = html;
+  box.innerHTML = html;
+  if (wasOpen) box.querySelector('details').open = true;
+  box.onclick = async (e) => {
+    const copy = e.target.closest('.chat-pay-copy');
+    if (copy) {
+      const { showToast } = await import('./toast.js');
+      try { await navigator.clipboard.writeText(copy.dataset.alias); showToast(goSharePlugin() ? 'Alias copiado. Al terminar, compartí el comprobante a GO! desde tu billetera.' : 'Alias copiado', 'success'); } catch (err) { showToast('No se pudo copiar. Alias: ' + copy.dataset.alias, 'info'); }
+      return;
+    }
+    if (e.target.closest('.chat-pay-how')) { showShareHelp(); return; }
+    if (e.target.closest('.chat-pay-receipt')) list.pickReceipt?.();
+  };
+}
+
+const messagePreview = (m) => (m.type === 'image' ? (m.caption ? `📷 ${m.caption}` : '📷 Foto') : m.type === 'audio' ? '🎤 Mensaje de voz' : (m.text || 'Mensaje'));
+
+const quoteHtml = (m) => (m.replyTo ? `
+  <button type="button" class="chat-quote" data-reply-to="${escapeHtml(m.replyTo.id)}">
+    <b>${escapeHtml(m.replyTo.senderName || 'Mensaje')}</b>
+    <span>${escapeHtml(m.replyTo.preview)}</span>
+  </button>` : '');
+
+function pendingUploadHtml(u) {
+  return `
+    <div class="chat-bubble-row is-mine">
+      <div class="chat-bubble bubble-mine bubble-image">
+        <div class="chat-image-container is-pending" data-upload-id="${u.id}" style="aspect-ratio:${u.isPdf ? 1.6 : imageRatio(u.width, u.height)};">
+          ${u.isPdf ? `<div class="chat-file-pending">${icon('fileText', 28)}<span>${escapeHtml(u.fileName)}</span></div>` : `<img src="${u.previewUrl}" class="chat-img is-loaded" alt="">`}
+          ${u.status === 'error' ? `
+            <div class="img-loader-overlay is-error">
+              ${icon('alertCircle', 24)}
+              <span>No se pudo enviar</span>
+              <div class="chat-upload-actions">
+                <button type="button" class="chat-upload-retry">Reintentar</button>
+                <button type="button" class="chat-upload-discard">Descartar</button>
+              </div>
+            </div>` : `
+            <div class="img-loader-overlay">
+              <div class="chat-upload-ring" style="--pct:${u.progress || 0};"><span class="chat-upload-pct">${u.progress || 0}%</span></div>
+            </div>`}
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderMessages(container, messages, currentUserId, { chatId, orderId, chatType, isAudit = false, canMarkPaid = false } = {}, pending = []) {
+  if (messages.length === 0 && pending.length === 0) {
+    container._rows = null;
     container.innerHTML = `
       <div class="chat-empty">
         ${icon('chatBubble', 48)}
         <p>Iniciá la conversación</p>
-        <span>Los mensajes aparecerán aquí</span>
+        <span>Los chats quedan guardados y pueden revisarse si hay un reclamo</span>
       </div>
     `;
     return;
@@ -1287,11 +1626,16 @@ function renderMessages(container, messages, currentUserId, { chatId, orderId, c
 
   let html = '';
   let lastDate = '';
+  const rows = [];
 
   // Determine alignment in audit mode: first sender on left, second sender on right
   const firstSenderId = messages.find(m => m.senderId && m.senderId !== 'system')?.senderId;
 
-  messages.forEach((msg, index) => {
+  messages.forEach((original, index) => {
+    html = '';
+    const msg = original.deleted && !isAudit
+      ? { id: original.id, senderId: original.senderId, senderName: original.senderName, timestamp: original.timestamp, read: original.read, type: 'text', text: '🚫 Mensaje eliminado', isDeletedView: true }
+      : original;
     let isMine = false;
     if (isAudit) {
       // In audit mode: align by sender identity so client is on left and commerce/delivery on right (or first sender on left, second on right)
@@ -1311,14 +1655,9 @@ function renderMessages(container, messages, currentUserId, { chatId, orderId, c
       const msgTime = msg.timestamp ? (msg.timestamp.toDate ? msg.timestamp.toDate().getTime() : new Date(msg.timestamp).getTime()) : now;
       const diffSeconds = (now - msgTime) / 1000;
 
-      if (msg.status === 'sending' || !msg.timestamp) {
-        ticksHtml = `
-          <span class="chat-tick" style="display:inline-flex; align-items:center; vertical-align:middle; line-height:1;">
-            <svg width="11" height="11" viewBox="0 0 12 11" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M1.5 5.5L4.5 8.5L10.5 2.5" stroke="rgba(255,255,255,0.45)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </span>
-        `;
+      if (msg.status === 'sending' || !msg.timestamp || (msg.pendingWrite && !msg.read)) {
+        // Todavía en este celular: se envía solo cuando haya señal
+        ticksHtml = `<span class="chat-tick" title="Enviando" style="display:inline-flex; align-items:center; vertical-align:middle; line-height:1;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="opacity:.7"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg></span>`;
       } else if (msg.read) {
         // Render double ticks (light blue when visto)
         ticksHtml = `
@@ -1354,99 +1693,63 @@ function renderMessages(container, messages, currentUserId, { chatId, orderId, c
     const isSystem = msg.senderId === 'system';
 
     if (isSystem) {
-      html += `<div class="chat-system-msg"><span>${msg.text}</span></div>`;
+      html += `<div class="chat-system-msg"><span>${escapeHtml(msg.text)}</span></div>`;
+      rows.push({ key: msg.id, html });
       return;
     }
 
     const showBubbleName = isAudit ? (!isConsecutive && msg.senderName) : (!isMine && !isConsecutive);
 
-    const reactions = msg.reactions || {};
-    let reactionsHtml = '';
-    const reactionEntries = Object.entries(reactions);
-    if (reactionEntries.length > 0) {
-      const uniqueEmojis = Array.from(new Set(reactionEntries.map(([uid, emoji]) => emoji)));
-      reactionsHtml = `
-        <div class="chat-bubble-reactions" style="position:absolute; bottom:-10px; right:10px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:12px; padding:2px 6px; display:inline-flex; align-items:center; gap:2px; box-shadow:0 2px 6px rgba(0,0,0,0.15); z-index:10; font-size:11px; cursor:pointer; user-select:none;">
-          ${uniqueEmojis.join('')} ${reactionEntries.length > 1 ? `<span style="font-size:9px; font-weight:800; color:var(--color-text-secondary); margin-left:2px;">${reactionEntries.length}</span>` : ''}
-        </div>
-      `;
-    }
+    const reactionsHtml = reactionPillHtml(msg.reactions, currentUserId);
 
     html += `
-      <div class="chat-bubble-row ${isMine ? 'is-mine' : 'is-other'} ${isConsecutive ? 'consecutive' : ''}">
-        ${showBubbleName ? `<div class="chat-bubble-name">${msg.senderName}</div>` : ''}
+      <div class="chat-bubble-row ${isMine ? 'is-mine' : 'is-other'} ${isConsecutive ? 'consecutive' : ''} ${reactionsHtml ? 'has-reactions' : ''}">
+        ${showBubbleName ? `<div class="chat-bubble-name">${escapeHtml(msg.senderName)}</div>` : ''}
         <div class="chat-bubble ${isMine ? 'bubble-mine' : 'bubble-other'} ${msg.type === 'image' ? 'bubble-image' : ''} ${msg.type === 'audio' ? 'bubble-audio' : ''}" data-msg-id="${msg.id}" style="position:relative;">
+          ${original.deleted && isAudit ? '<div class="chat-deleted-tag">Lo eliminó quien lo escribió</div>' : ''}
+          ${quoteHtml(msg)}
           ${msg.type === 'image' ? `
-            <div class="chat-image-container" data-url="${msg.imageUrl}">
-              <img src="${msg.imageUrl || ''}" class="chat-img" style="${msg.status === 'uploading' ? 'filter: blur(4px); opacity: 0.5;' : (msg.status === 'error' || !msg.imageUrl ? 'display: none;' : '')}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+            <div class="chat-image-container ${msg.status === 'uploading' || msg.status === 'error' || !msg.imageUrl ? 'is-pending' : ''}" data-url="${escapeHtml(msg.imageUrl)}" style="aspect-ratio:${imageRatio(msg.width, msg.height)};${msg.thumb ? ` background-image:url('${escapeHtml(msg.thumb)}');` : ''}">
+              ${msg.imageUrl ? `<img src="${escapeHtml(localImagePreviews.get(msg.imageUrl) || msg.imageUrl)}" class="chat-img" alt="Foto" loading="lazy" decoding="async">` : ''}
               ${msg.status === 'uploading' ? `
                 <div class="img-loader-overlay">
                   <div class="spinner-small"></div>
-                  <span>${msg.text || 'Cargando...'}</span>
+                  <span>Subiendo…</span>
                 </div>
               ` : msg.status === 'error' || !msg.imageUrl ? `
-                <div class="img-loader-overlay" style="background: rgba(220, 53, 69, 0.8);">
-                  <span>${icon('alertCircle', 24)}</span>
-                  <span style="text-align: center; font-size: 11px;">Error al subir foto</span>
+                <div class="img-loader-overlay is-error">
+                  ${icon('alertCircle', 24)}
+                  <span>No se pudo enviar la foto</span>
                 </div>
               ` : `
-                <div class="img-expand-hint">${icon('eye', 12)} Ver</div>
+                <div class="chat-img-failed">${icon('alertCircle', 20)}<span>Tocá para volver a cargar</span></div>
+                <div class="bubble-time"><span>${timeStr}</span>${isMine ? ticksHtml : ''}</div>
               `}
             </div>
-          ` : msg.type === 'audio' ? `
-            <div class="wa-audio-player" style="display:flex; align-items:center; gap:12px; padding:12px 14px; min-width:270px; max-width:320px; box-sizing:border-box;">
-              <!-- Avatar Column -->
-              <div style="position:relative; width:40px; height:40px; flex-shrink:0;">
-                ${msg.senderPhoto ? `
-                  <img src="${msg.senderPhoto}" style="width:40px; height:40px; border-radius:50%; object-fit:cover; display:block;" />
-                ` : `
-                  <div style="width:40px; height:40px; border-radius:50%; background:${isMine ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.06)'}; color:${isMine ? 'white' : 'var(--color-text-primary)'}; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:15px; font-family:var(--font-display);">
-                    ${(msg.senderName || 'U')[0].toUpperCase()}
-                  </div>
-                `}
-                <!-- Green mic icon overlap at bottom-right of avatar -->
-                <div style="position:absolute; bottom:-3px; right:-3px; background:#00e676; border:2px solid ${isMine ? '#121212' : '#ffffff'}; border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; color:white; z-index:2; box-shadow:0 1px 2px rgba(0,0,0,0.15);">
-                  <svg viewBox="0 0 24 24" width="10" height="10" fill="white"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>
-                </div>
-              </div>
-
-              <!-- Play/Pause Column -->
-              <audio class="wa-chat-audio" src="${msg.audioUrl}" preload="metadata" style="display:none;"></audio>
-              <button onclick="window.playCustomAudio(this)" style="background:transparent; border:none; width:24px; height:24px; display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; outline:none; padding:0;">
-                <span class="wa-play-icon" style="color:${isMine ? 'white' : '#54656f'}; display:flex; align-items:center; justify-content:center;">
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="display:block;"><path d="M8 5v14l11-7z"/></svg>
-                </span>
-              </button>
-
-              <!-- Waveform + Metadata Column -->
-              <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:0;">
-                <!-- Waveform Container -->
-                <div class="wa-waveform-container" style="position:relative; width:100%; height:20px; display:flex; align-items:center;">
-                  <!-- Waveform bars -->
-                  <div class="wa-waveform-bars" style="display:flex; align-items:center; gap:2px; width:100%; height:100%;">
-                    ${[10,14,12,8,6,10,14,18,22,16,12,8,10,14,20,24,18,14,10,8,12,16,20,14,10,6,8,12,16,10].map(h => `
-                      <div class="wa-waveform-bar" style="flex:1; height:${h}px; background:${isMine ? 'rgba(255,255,255,0.25)' : '#b1b3b5'}; border-radius:1px; transition:background-color 0.1s;"></div>
-                    `).join('')}
-                  </div>
-                  <!-- Handle/Thumb -->
-                  <div class="wa-waveform-handle" style="position:absolute; width:10px; height:10px; border-radius:50%; background:#34b7f1; top:50%; transform:translate(-50%, -50%); left:0%; pointer-events:none; box-shadow:0 1px 3px rgba(0,0,0,0.25); transition:left 0.05s linear;"></div>
-                  <!-- Hidden Input Range -->
-                  <input type="range" class="wa-audio-seek" value="0" min="0" max="100" style="position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; z-index:10; margin:0; padding:0;">
-                </div>
-
-                <!-- Duration & Timestamp Row -->
-                <div style="display:flex; justify-content:space-between; align-items:center; font-size:10.5px; color:${isMine ? '#a1a1aa' : '#667781'}; font-weight:700;">
-                  <span class="wa-audio-time">0:00</span>
-                  <div style="display:flex; align-items:center; gap:3px;">
-                    <span>${timeStr}</span>
-                    ${isMine ? ticksHtml : ''}
-                  </div>
-                </div>
-              </div>
+          ${msg.caption ? `<div class="chat-img-caption">${escapeHtml(msg.caption)}</div>` : ''}
+          ` : msg.type === 'file' && /^https?:\/\//.test(msg.fileUrl || '') ? `
+            <a class="chat-location" href="${escapeHtml(msg.fileUrl)}" target="_blank" rel="noopener noreferrer">
+              <span class="chat-location-icon">${icon('fileText', 22)}</span>
+              <span style="min-width:0; overflow-wrap:anywhere;"><b>${escapeHtml(msg.fileName || 'Archivo')}</b><small>Abrir PDF</small></span>
+            </a>
+            <div class="chat-card-time"><span>${timeStr}</span>${isMine ? ticksHtml : ''}</div>
+          ` : msg.type === 'location' && Number.isFinite(Number(msg.lat)) && Number.isFinite(Number(msg.lng)) ? `
+            <a class="chat-location" href="https://www.google.com/maps?q=${Number(msg.lat)},${Number(msg.lng)}" target="_blank" rel="noopener noreferrer">
+              <span class="chat-location-icon">${icon('mapPin', 22)}</span>
+              <span><b>Ubicación compartida</b><small>Abrir en el mapa</small></span>
+            </a>
+            <div class="chat-card-time"><span>${timeStr}</span>${isMine ? ticksHtml : ''}</div>
+          ` : msg.type === 'product' && msg.product ? `
+            <div class="chat-product-card">
+              ${msg.product.image ? `<img src="${escapeHtml(msg.product.image)}" alt="" loading="lazy">` : `<span class="chat-product-noimg">${icon('shoppingBag', 20)}</span>`}
+              <span><b>${escapeHtml(msg.product.name)}</b>${Number(msg.product.price) > 0 ? `<small>$ ${Number(msg.product.price).toLocaleString('es-AR')}</small>` : ''}</span>
             </div>
+            <div class="chat-card-time"><span>${timeStr}</span>${isMine ? ticksHtml : ''}</div>
+          ` : msg.type === 'audio' ? `
+            ${audioBubbleHtml(msg, { timeStr, ticksHtml: isMine ? ticksHtml : '', isMine })}
           ` : `
             <div style="display:flex; flex-direction:column; gap:2px; min-width:60px;">
-              <span class="bubble-text" style="word-break:break-word; padding-right:16px;">${escapeHtml(msg.text)}</span>
+              <span class="bubble-text ${msg.isDeletedView ? 'is-deleted' : ''}" style="word-break:break-word; padding-right:16px;">${escapeHtml(msg.text)}</span>
               <div style="display:flex; align-items:center; justify-content:flex-end; gap:3px; font-size:9.5px; color:${isMine ? '#a1a1aa' : '#9ca3af'}; font-weight:700; align-self:flex-end; margin-top:2px; margin-bottom:-4px; margin-right:-6px; opacity:0.85;">
                 <span>${timeStr}</span>
                 ${isMine ? ticksHtml : ''}
@@ -1455,12 +1758,6 @@ function renderMessages(container, messages, currentUserId, { chatId, orderId, c
           `}
           ${reactionsHtml}
         </div>
-        ${msg.type === 'image' ? `
-          <div class="bubble-time-outside" style="display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:750; color:var(--color-text-tertiary); margin-top:3px; padding:0 4px; ${isMine ? 'align-self:flex-end;' : 'align-self:flex-start;'}">
-            <span>${timeStr}</span>
-            ${isMine ? ticksHtml : ''}
-          </div>
-        ` : ''}
         ${seenTimeHtml}
       </div>
         <!-- Action: Mark as Paid (Only for Commerce) -->
@@ -1473,20 +1770,86 @@ function renderMessages(container, messages, currentUserId, { chatId, orderId, c
         ` : msg.paidChecked ? `
           <div class="paid-verified-badge">${icon('checkCircle', 12)} Pago verificado</div>
         ` : ''}
-      </div>
     `;
+    rows.push({ key: msg.id, html });
+  });
+  pending.forEach(u => rows.push({ key: u.id, html: pendingUploadHtml(u), mine: true }));
+
+  applyRows(container, rows, messages, currentUserId);
+}
+
+// Antes se redibujaba toda la lista con cada cambio (un visto, una reacción): las fotos parpadeaban
+// y se cortaba el audio que estaba sonando. Ahora solo se toca el renglón que cambió.
+function applyRows(container, rows, messages, currentUserId) {
+  const first = !container._rows;
+  if (first) {
+    container._rows = new Map();
+    container.innerHTML = '';
+    bindImageEvents(container);
+  }
+  const known = container._rows;
+  const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 140;
+  const lastKey = rows[rows.length - 1]?.key;
+  const newLast = lastKey && !known.has(lastKey);
+  const lastIsMine = rows[rows.length - 1]?.mine || messages.find(m => m.id === lastKey)?.senderId === currentUserId;
+
+  const wanted = new Set(rows.map(r => r.key));
+  known.forEach((row, key) => {
+    if (!wanted.has(key)) { row.el.remove(); known.delete(key); }
   });
 
-  container.innerHTML = html;
-  requestAnimationFrame(() => {
-    container.scrollTop = container.scrollHeight;
+  let cursor = container.firstElementChild;
+  rows.forEach(({ key, html }) => {
+    let row = known.get(key);
+    if (!row) {
+      const el = document.createElement('div');
+      el.className = 'chat-row-wrap';
+      el.innerHTML = html;
+      row = { el, html };
+      known.set(key, row);
+      container.insertBefore(el, cursor);
+    } else {
+      // Un audio sonando se deja como está: se actualiza en el próximo cambio
+      const playing = [...row.el.querySelectorAll('audio')].some(a => !a.paused);
+      if (row.html !== html && !playing) {
+        row.el.innerHTML = html;
+        row.html = html;
+      }
+      if (row.el === cursor) cursor = cursor.nextElementSibling;
+      else container.insertBefore(row.el, cursor);
+    }
   });
+
+  if (first || (newLast && (nearBottom || lastIsMine))) {
+    container.scrollTop = container.scrollHeight;
+    requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
+  }
+}
+
+function bindImageEvents(container) {
+  if (container.dataset.imagesReady) return;
+  container.dataset.imagesReady = '1';
+  // load y error no suben por el árbol: se escuchan en la fase de captura
+  container.addEventListener('load', (e) => {
+    if (!e.target.classList?.contains('chat-img')) return;
+    e.target.classList.add('is-loaded');
+    e.target.closest('.chat-image-container')?.classList.remove('has-failed');
+  }, true);
+  container.addEventListener('error', (e) => {
+    if (e.target.classList?.contains('chat-img')) e.target.closest('.chat-image-container')?.classList.add('has-failed');
+  }, true);
 }
 
 function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text || '';
-  return div.innerHTML;
+  return String(text ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function updateRecordingStatus(chatRef, uid, on) {
+  try {
+    await updateDoc(chatRef, { [`recording.${uid}`]: on });
+  } catch (e) {
+    // Igual que escribiendo: si no se pudo, no importa
+  }
 }
 
 async function updateTypingStatus(chatRef, uid, isTyping) {
@@ -1499,14 +1862,14 @@ async function updateTypingStatus(chatRef, uid, isTyping) {
   }
 }
 
-function showTypingIndicator(chatId, show, otherName) {
+function showTypingIndicator(chatId, show, otherName, what = 'está escribiendo') {
   const container = document.getElementById(`chat-typing-indicator-${chatId}`);
   if (!container) return;
 
   if (show) {
     container.innerHTML = `
       <div class="typing-bubble">
-        <span class="typing-text">${otherName} está escribiendo</span>
+        <span class="typing-text">${escapeHtml(otherName)} ${what}</span>
         <div class="typing-dots">
           <span></span><span></span><span></span>
         </div>
@@ -1523,126 +1886,4 @@ function showTypingIndicator(chatId, show, otherName) {
     container.innerHTML = '';
     container.style.display = 'none';
   }
-}
-
-function initReactionListeners(container, user, messagesRef, chatId) {
-  let pressTimer = null;
-  const cancelPress = () => {
-    if (pressTimer) {
-      clearTimeout(pressTimer);
-      pressTimer = null;
-    }
-  };
-
-  if (container.dataset.reactionsInitialized === 'true') return;
-  container.dataset.reactionsInitialized = 'true';
-
-  container.addEventListener('touchstart', (e) => {
-    const bubble = e.target.closest('.chat-bubble');
-    if (!bubble) return;
-    const msgId = bubble.dataset.msgId;
-    if (!msgId) return;
-
-    if (e.target.closest('.chat-bubble-reactions')) {
-      showReactionMenu(e, bubble, msgId, user, messagesRef, chatId);
-      return;
-    }
-
-    cancelPress();
-    pressTimer = setTimeout(() => {
-      showReactionMenu(e, bubble, msgId, user, messagesRef, chatId);
-    }, 600);
-  }, { passive: true });
-
-  container.addEventListener('touchend', cancelPress, { passive: true });
-  container.addEventListener('touchmove', cancelPress, { passive: true });
-
-  container.addEventListener('click', (e) => {
-    const rxBadge = e.target.closest('.chat-bubble-reactions');
-    if (rxBadge) {
-      const bubble = rxBadge.closest('.chat-bubble');
-      const msgId = bubble?.dataset.msgId;
-      if (bubble && msgId) {
-        showReactionMenu(e, bubble, msgId, user, messagesRef, chatId);
-      }
-    }
-  });
-
-  container.addEventListener('contextmenu', (e) => {
-    const bubble = e.target.closest('.chat-bubble');
-    if (!bubble) return;
-    e.preventDefault();
-    const msgId = bubble.dataset.msgId;
-    if (msgId) {
-      showReactionMenu(e, bubble, msgId, user, messagesRef, chatId);
-    }
-  });
-}
-
-function showReactionMenu(event, bubble, msgId, user, messagesRef, chatId) {
-  const existing = document.querySelector('.chat-reaction-menu');
-  if (existing) existing.remove();
-
-  const rect = bubble.getBoundingClientRect();
-  const chatContainer = bubble.closest('.chat-container') || document.body;
-  const containerRect = chatContainer.getBoundingClientRect();
-
-  const menu = document.createElement('div');
-  menu.className = 'chat-reaction-menu';
-  
-  const emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
-  menu.innerHTML = emojis.map(emo => `
-    <span class="reaction-emoji-btn" style="font-size:22px; cursor:pointer; transition:transform 0.15s; user-select:none;" onmouseover="this.style.transform='scale(1.25)'" onmouseout="this.style.transform=''" data-emoji="${emo}">${emo}</span>
-  `).join('');
-
-  chatContainer.appendChild(menu);
-
-  const menuWidth = 240;
-  const leftPos = Math.max(10, Math.min(containerRect.width - menuWidth - 10, rect.left - containerRect.left + (rect.width - menuWidth) / 2));
-  const topPos = rect.top - containerRect.top - 48;
-
-  menu.style.cssText = `
-    position: absolute;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 30px;
-    padding: 6px 12px;
-    display: flex;
-    gap: 10px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-    z-index: 1000;
-    left: ${leftPos}px;
-    top: ${topPos}px;
-    animation: popIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  `;
-
-  menu.addEventListener('mousedown', ev => ev.stopPropagation());
-  menu.addEventListener('touchstart', ev => ev.stopPropagation(), { passive: true });
-
-  menu.querySelectorAll('.reaction-emoji-btn').forEach(btn => {
-    btn.onclick = async () => {
-      const emoji = btn.dataset.emoji;
-      menu.remove();
-      
-      try {
-        const { updateDoc, doc } = await import('firebase/firestore');
-        const msgRef = doc(messagesRef, msgId);
-        await updateDoc(msgRef, {
-          [`reactions.${user.uid}`]: emoji
-        });
-      } catch (err) {
-        console.error("Error setting reaction:", err);
-      }
-    };
-  });
-
-  const dismissMenu = () => {
-    menu.remove();
-    document.removeEventListener('click', dismissMenu);
-    document.removeEventListener('touchstart', dismissMenu);
-  };
-  setTimeout(() => {
-    document.addEventListener('click', dismissMenu);
-    document.addEventListener('touchstart', dismissMenu, { passive: true });
-  }, 100);
 }

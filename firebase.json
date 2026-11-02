@@ -15,7 +15,8 @@
       ],
       "ignore": [
         "firebase.json",
-        "**/.*",
+        "**/.DS_Store",
+        "**/.git/**",
         "**/node_modules/**"
       ],
       "redirects": [
@@ -90,6 +91,15 @@
         }
       ],
       "headers": [
+        {
+          "source": "/.well-known/apple-app-site-association",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
         {
           "source": "/map/**",
           "headers": [

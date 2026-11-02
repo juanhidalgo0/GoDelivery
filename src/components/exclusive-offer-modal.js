@@ -2,6 +2,7 @@
 import { getState } from '../state.js';
 import { formatPrice } from '../utils/format.js';
 import { AudioManager } from '../utils/audio-manager.js';
+import { haptic } from '../utils/native.js';
 import { showToast } from '../components/toast.js';
 import { db } from '../firebase.js';
 import { doc, getDoc, getDocs, collection, runTransaction } from 'firebase/firestore';
@@ -83,15 +84,14 @@ export function playExclusiveOfferAlert() {
     console.warn('Could not start offer loop sound:', err);
   }
 
-  if (navigator.vibrate) {
-    try { navigator.vibrate([600, 200, 600, 200, 600]); } catch (e) {}
-  }
-
-  window.exclusiveAlertInterval = setInterval(() => {
+  // iPhone no tiene navigator.vibrate: con la app nueva vibra por el plugin
+  const buzz = () => {
     if (navigator.vibrate) {
       try { navigator.vibrate([600, 200, 600, 200, 600]); } catch (e) {}
-    }
-  }, 2500);
+    } else haptic('warning');
+  };
+  buzz();
+  window.exclusiveAlertInterval = setInterval(buzz, 2500);
 
   // Safety net: an offer lasts 60s. Whatever path started the alarm, it must never outlive
   // the offer (a late push after accepting used to leave the bell ringing forever).

@@ -1,4 +1,5 @@
 import { showToast } from '../components/toast.js';
+import { haptic } from './native.js';
 
 let isUnlocked = true;
 let audioCtx = null;
@@ -467,7 +468,8 @@ export const AudioManager = {
   },
   
   vibrate(pattern = [200, 100, 200]) {
-    if (!navigator.vibrate) return;
+    // iPhone no tiene navigator.vibrate: con la app nueva vibra por el plugin
+    if (!navigator.vibrate) { haptic('heavy'); return; }
     
     try {
       navigator.vibrate(pattern);
@@ -596,18 +598,18 @@ export const AudioManager = {
   },
 
   hapticLight() {
-    this.vibrate([30]);
+    haptic('light');
   },
 
   hapticMedium() {
-    this.vibrate([65]);
+    haptic('medium');
   },
 
   hapticSuccess() {
-    this.vibrate([50, 40, 90]);
+    haptic('success');
   },
 
   hapticError() {
-    this.vibrate([90, 50, 90, 50, 120]);
+    haptic('error');
   }
 };

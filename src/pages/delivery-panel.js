@@ -83,6 +83,19 @@ async function openDeliveryMapModal(order, batch = null) {
 // An online driver without push gets offers assigned by the server that they never hear
 // about (the offer only shows if the app happens to be open). Re-register the token and,
 // if the OS blocks notifications, say so on screen instead of failing silently.
+// Bloqueados de verdad, según el celular. Pide el permiso si todavía se puede; con tope, para que
+// "Iniciar Jornada" nunca quede colgado esperando al sistema.
+async function driverPushBlocked() {
+  const check = (async () => {
+    const { ensureDriverPushReady } = await import('../utils/notifications.js');
+    const native = await ensureDriverPushReady({ force: true });
+    if (native === 'denied') return true;
+    if (native === 'unsupported' && 'Notification' in window) return Notification.permission === 'denied';
+    return false;
+  })().catch(() => false);
+  return Promise.race([check, new Promise(resolve => setTimeout(() => resolve(false), 8000))]);
+}
+
 async function checkDriverPushHealth(force = false) {
   try {
     const { ensureDriverPushReady } = await import('../utils/notifications.js');
@@ -1580,6 +1593,14 @@ export async function renderDeliveryPanel(containerArg) {
     hudContainer = document.createElement('div');
     hudContainer.id = 'driver-hud-container';
     document.body.appendChild(hudContainer);
+    // El cartel crece con direcciones largas: los botones del mapa quedan siempre debajo
+    const placeMapControls = () => {
+      const banner = document.getElementById('driver-maneuver-hud-card');
+      const controls = document.getElementById('driver-map-controls-group');
+      if (banner && controls) controls.style.top = `${Math.round(banner.getBoundingClientRect().bottom) + 10}px`;
+    };
+    new MutationObserver(placeMapControls).observe(hudContainer, { childList: true, subtree: true, characterData: true });
+    window.addEventListener('resize', placeMapControls);
   } else if (hudContainer.parentElement !== document.body) {
     document.body.appendChild(hudContainer);
   }
@@ -6606,8 +6627,8 @@ function renderStatusBar(user) {
         </div>
         <div style="flex: 1; min-width: 0;">
           <div style="font-size: 12px; font-weight: 600; color: ${tk.tx3}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${esc(stepLabel)}</div>
-          <div style="font-size: 15.5px; font-weight: 600; color: ${tk.tx}; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${esc(destTitle)}</div>
-          <div style="font-size: 12.5px; color: ${tk.tx2}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;">
+          <div style="font-size: 15.5px; font-weight: 600; color: ${tk.tx}; line-height: 1.25; overflow-wrap: anywhere;">${esc(destTitle)}</div>
+          <div style="font-size: 12.5px; line-height: 1.3; color: ${tk.tx2}; overflow-wrap: anywhere; margin-top: 1px;">
             ${noGpsMandado
               ? (shoppingStop && shoppingStop.nearest ? `El cliente pidió cualquier ${esc(categoryLabel(shoppingStop.nearest))}: la más cerca` : 'Ubicación a confirmar · buscalo con Navegar')
               : `<span id="driver-maneuver-subtext" style="font-weight:600;color:${tk.tx}">${mDist || 'Ruta'}</span> · <span id="driver-maneuver-text">${esc(m.instruction || 'Seguí la línea del mapa')}</span>`}
@@ -6756,7 +6777,17 @@ function dockNavUrl(o, isPickup) {
 /** Qué pasa con la plata en esta parada (una sola fila). */
 function dockMoneyRow(o, isPickup, isLight) {
   const t = driverTokens(isLight);
-  const breakdownBtn = `<button class="open-order-breakdown-btn" data-order-id="${esc(o.id)}" style="height:36px;padding:0 10px;border-radius:10px;background:transparent;border:1px solid ${t.line};color:${t.tx2};font-size:12.5px;font-weight:600;cursor:pointer;flex-shrink:0;font-family:inherit">Desglose</button>`;
+  const breakdownBtn = `<button class="open-order-breakdown-btn" data-order-id="${esc(o.id)}" aria-label="Ver desglose" title="Ver desglose" style="width:36px;height:36px;padding:0;border-radius:10px;background:transparent;border:1px solid ${t.line};color:${t.tx2};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button>`;
+  // Lo que se cobra: un solo renglón, y toda la tarjeta se toca para ver el desglose
+  const payRow = (label, icon, sub = '') => `<button class="open-order-breakdown-btn" data-order-id="${esc(o.id)}" aria-label="${esc(label)} ${esc(money(total))}. Ver desglose" style="width:100%;min-height:52px;box-sizing:border-box;padding:8px 10px 8px 14px;border:0;border-radius:16px;background:${t.amberBg};cursor:pointer;display:block;text-align:left;font-family:inherit">
+      <span style="display:flex;align-items:center;gap:10px">
+        ${dIcon(icon, 19, t.amberTx)}
+        <span style="flex:1;min-width:0;font-size:14px;font-weight:700;color:${t.amberTx};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(label)}</span>
+        <span style="font-family:var(--font-display,'Outfit',sans-serif);font-size:21px;font-weight:700;color:${t.tx};white-space:nowrap">${esc(money(total))}</span>
+        <span style="color:${t.tx2};display:flex;flex-shrink:0"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></span>
+      </span>
+      ${sub ? `<span style="display:block;font-size:12px;color:${t.tx2};margin-top:2px">${esc(sub)}</span>` : ''}
+    </button>`;
   const favorType = String(o.favorType || '').toLowerCase();
   const total = Number(o.totalAmount || o.total || 0);
   if (favorType === 'gocash' || o.isGoCash) {
@@ -6780,12 +6811,13 @@ function dockMoneyRow(o, isPickup, isLight) {
   // GoPoints / cupón: el total ya viene con el descuento restado, y el repartidor tiene que saberlo
   const discount = discountRow(o, isLight);
   if (isCashPayment(o)) {
-    if (o.isTrip) return moneyRow({ label: 'Cobrás al terminar', amount: money(total), sub: 'En efectivo', tone: 'amber', action: breakdownBtn }, isLight) + discount;
-    return moneyRow({ label: isPickup ? 'Al entregar cobrás en efectivo' : 'Cobrá en efectivo', amount: money(total), sub: o.cashChangeFor ? `Tené cambio: paga con ${money(o.cashChangeFor)}` : '', tone: 'amber', action: breakdownBtn }, isLight) + discount;
+    const change = o.cashChangeFor ? `Tené cambio: paga con ${money(o.cashChangeFor)}` : '';
+    if (o.isTrip) return payRow('Efectivo', 'cash', change) + discount;
+    return payRow(isPickup ? 'Efectivo al entregar' : 'Efectivo', 'cash', change) + discount;
   }
   // Transferencia: el cliente le transfiere al alias del repartidor al recibir (nunca se paga antes)
-  if (o.isTrip) return moneyRow({ label: 'Cobrás al terminar', amount: money(total), sub: 'Por transferencia a tu alias', tone: 'amber', icon: 'swap', action: breakdownBtn }, isLight) + discount;
-  return moneyRow({ label: isPickup ? 'Al entregar cobrás por transferencia' : 'Cobrá por transferencia', amount: money(total), sub: 'A tu alias, cuando recibe el pedido', tone: 'amber', icon: 'swap', action: breakdownBtn }, isLight) + discount;
+  if (o.isTrip) return payRow('Transferencia', 'swap') + discount;
+  return payRow(isPickup ? 'Transferencia al entregar' : 'Transferencia', 'swap') + discount;
 }
 
 function renderDockActionRow(order, orderIsPickup, isLight) {
@@ -6828,18 +6860,30 @@ function renderDockActionRow(order, orderIsPickup, isLight) {
     </div>`;
 }
 
+// Mensajes sin leer en el botón de chat de la tarjeta; se actualiza solo y al redibujarse la tarjeta
+let dockChatBadgesListening = false;
+async function syncDockChatBadges() {
+  const { getUnreadCount, onUnreadChange } = await import('../components/chat-notifier.js');
+  const paint = () => document.querySelectorAll('.driver-dock-chat-badge').forEach(el => {
+    const n = getUnreadCount(el.dataset.chatOrder, 'client-delivery');
+    el.textContent = n > 9 ? '9+' : String(n);
+    el.style.display = n > 0 ? 'flex' : 'none';
+  });
+  if (!dockChatBadgesListening) {
+    dockChatBadgesListening = true;
+    onUnreadChange(paint);
+  }
+  paint();
+}
+
 function dockContactRow(o, isPickup, isLight, withNav = true) {
   const t = driverTokens(isLight);
   const nav = dockNavUrl(o, isPickup);
   const wa = dockWhatsAppUrl(o);
-  // The call button always rings the customer, at every stop and in every kind of order.
-  const phone = String(o.userPhone || o.clientPhone || o.phone || '').replace(/[^\d+]/g, '');
   const sq = `${withNav ? 'width:48px;' : 'flex:1;'}height:48px;border-radius:16px;background:${t.card};border:1px solid ${t.line};color:${t.tx};display:flex;align-items:center;justify-content:center;flex-shrink:0;text-decoration:none;cursor:pointer;padding:0`;
   return `<div style="display:flex;gap:10px">
     ${nav && withNav ? `<a href="${esc(nav)}" target="_blank" rel="noopener noreferrer" style="flex:1;height:48px;border-radius:16px;background:${t.card};border:1px solid ${t.line};color:${t.tx};font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none">${dIcon('nav', 18, t.brandTx)}Navegar</a>` : (withNav ? '<span style="flex:1"></span>' : '')}
-    ${phone ? `<a href="tel:${esc(phone)}" aria-label="Llamar" title="Llamar" style="${sq}">${dIcon('phone', 20)}</a>` : ''}
     ${wa ? `<a href="${esc(wa)}" target="_blank" rel="noopener noreferrer" aria-label="WhatsApp al cliente" title="WhatsApp" style="${sq};color:#25D366"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M.057 24l1.687-6.163A11.867 11.867 0 0 1 .157 11.89C.16 5.335 5.495 0 12.05 0a11.82 11.82 0 0 1 8.413 3.488 11.82 11.82 0 0 1 3.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 0 1-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.82 9.82 0 0 0 1.746 5.634l-.999 3.648 3.742-.981z"/></svg></a>` : ''}
-    <button class="driver-dock-chat-btn" data-order-id="${esc(o.id)}" data-customer-name="${esc(o.userName || o.clientName || 'Cliente')}" aria-label="Chat con el cliente" title="Chat" style="${sq}">${dIcon('chat', 20)}</button>
   </div>`;
 }
 
@@ -6977,12 +7021,14 @@ export function renderBottomDockContent(user, activeOrders = []) {
       <div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${t.tx3};margin-bottom:8px">Lista de compra · ${shopperItems.length} producto${shopperItems.length === 1 ? '' : 's'}</div>
       <div data-dock-scroll style="display:flex;flex-direction:column;gap:8px;max-height:${isExpanded ? 'none' : 'clamp(96px, calc(100dvh - 540px), 30vh)'};overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain">
         ${shopperItems.map((it, i) => {
-          const missing = shopperMarks && shopperMarks.state[i] && shopperMarks.state[i].choice === 'missing';
+          const mark = shopperMarks && shopperMarks.state[i] && shopperMarks.state[i].choice;
+          const missing = mark === 'missing' || mark === 'removed';
           return `<div style="display:flex;gap:10px;align-items:flex-start">
+            ${it.image ? `<img src="${esc(it.image)}" alt="" loading="lazy" style="width:40px;height:40px;border-radius:10px;object-fit:cover;flex-shrink:0;background:#fff;${missing ? 'opacity:.45;' : ''}">` : ''}
             <span style="flex-shrink:0;min-width:36px;padding:3px 7px;box-sizing:border-box;border-radius:8px;background:${t.sheet};border:1px solid ${t.line};color:${t.tx};font-size:14px;font-weight:700;line-height:1.3;text-align:center;white-space:nowrap">${isWeighedItem(it) ? esc(itemWeightLabel(it)) : `${esc(it.qty || it.quantity || 1)}×`}</span>
             <span style="flex:1;min-width:0;padding-top:2px">
               <span style="display:block;font-size:15px;line-height:1.35;color:${missing ? t.tx3 : t.tx};word-break:break-word;${missing ? 'text-decoration:line-through;' : ''}">${esc(it.name || 'Producto')}</span>
-              ${missing ? `<span style="display:block;font-size:13px;font-weight:600;color:${t.tx3};margin-top:1px">No había</span>` : ''}
+              ${missing ? `<span style="display:block;font-size:13px;font-weight:600;color:${t.tx3};margin-top:1px">${mark === 'removed' ? 'Lo sacó el cliente' : 'No había'}</span>` : ''}
               ${it.notes && !missing ? `<span style="display:block;font-size:13px;font-weight:600;color:${t.amberTx};margin-top:1px;word-break:break-word">Nota: ${esc(it.notes)}</span>` : ''}
             </span>
           </div>`;
@@ -6992,9 +7038,10 @@ export function renderBottomDockContent(user, activeOrders = []) {
   const stopBlock = `<div style="display:flex;align-items:center;gap:12px">
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;color:${t.tx3};font-weight:600">${esc(txt.verb)}</div>
-        <div style="font-family:var(--font-display,'Outfit',sans-serif);font-size:21px;font-weight:600;color:${t.tx};line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(txt.title)}</div>
-        ${txt.sub ? `<div style="font-size:14px;color:${t.tx2};margin-top:2px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:${isExpanded ? 2 : 1};-webkit-box-orient:vertical;overflow:hidden">${esc(txt.sub)}</div>` : ''}
+        <div style="font-family:var(--font-display,'Outfit',sans-serif);font-size:21px;font-weight:600;color:${t.tx};line-height:1.2;overflow-wrap:anywhere">${esc(txt.title)}</div>
+        ${txt.sub ? `<div style="font-size:14px;color:${t.tx2};margin-top:2px;line-height:1.35;overflow-wrap:anywhere">${esc(txt.sub)}</div>` : ''}
       </div>
+      <button class="driver-dock-chat-btn" data-order-id="${esc(o.id)}" data-customer-name="${esc(o.userName || o.clientName || 'Cliente')}" aria-label="Chat con el cliente" title="Chat" style="position:relative;width:52px;height:52px;border-radius:26px;background:${t.card};border:1px solid ${t.line};color:${t.tx};display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;padding:0">${dIcon('chat', 22)}<span class="driver-dock-chat-badge" data-chat-order="${esc(o.id)}" style="display:none;position:absolute;top:-3px;right:-3px;min-width:22px;height:22px;padding:0 5px;box-sizing:border-box;border-radius:11px;background:#E11D48;color:#fff;font-size:12px;font-weight:800;align-items:center;justify-content:center;border:2px solid ${t.sheet}"></span></button>
       ${navUrl ? `<a href="${esc(navUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Navegar con Google Maps" title="Navegar" style="width:52px;height:52px;border-radius:26px;background:${t.card};border:1px solid ${t.line};color:${t.brandTx};display:flex;align-items:center;justify-content:center;flex-shrink:0;text-decoration:none">${dIcon('nav', 22, t.brandTx)}</a>` : ''}
     </div>${isExpanded ? '' : shopList}`;
 
@@ -7051,7 +7098,7 @@ export function renderBottomDockContent(user, activeOrders = []) {
     // La lista de compra ya se ve arriba, con lo marcado
     const itemsHtml = items.length && !shopperItems.length ? `<div style="border-radius:14px;background:${t.card};padding:10px 14px;display:flex;flex-direction:column;gap:6px">${items.map(it => `
         <div style="display:flex;justify-content:space-between;gap:10px;font-size:14px;color:${t.tx2}">
-          <span>${isWeighedItem(it) ? itemWeightLabel(it) : `${esc(it.qty || it.quantity || it.cant || 1)}×`} ${esc(it.name || it.title || 'Producto')}</span>
+          <span style="display:flex;align-items:center;gap:8px;min-width:0">${it.image ? `<img src="${esc(it.image)}" alt="" loading="lazy" style="width:32px;height:32px;border-radius:8px;object-fit:cover;flex-shrink:0;background:#fff;">` : ''}<span>${isWeighedItem(it) ? itemWeightLabel(it) : `${esc(it.qty || it.quantity || it.cant || 1)}×`} ${esc(it.name || it.title || 'Producto')}</span></span>
           ${it.price ? `<span style="color:${t.tx};font-weight:600;white-space:nowrap">${money(it.price * (it.qty || it.quantity || 1))}</span>` : ''}
         </div>`).join('')}</div>` : '';
     const notes = o.addressNotes || o.notes || o.clientNotes;
@@ -7818,6 +7865,7 @@ export function attachBottomDockListeners(user, activeOrders = []) {
 
   // OPEN CHAT FOR INDIVIDUAL ORDERS IN BOTTOM DOCK
   const dockChatBtns = document.querySelectorAll('.driver-dock-chat-btn');
+  syncDockChatBadges();
   dockChatBtns.forEach(btn => {
     btn.onclick = async (e) => {
       e.preventDefault();
@@ -8682,6 +8730,31 @@ export async function promptStartSession(user) {
                 <p style="margin: 0; font-size: 13px; color: var(--color-text-secondary); line-height: 1.55; font-weight: 600;">
                   Para conectarte y recibir pedidos, GoDelivery necesita permiso de ubicación activo — sin eso no podemos asignarte pedidos cercanos ni mostrar tu recorrido al cliente.<br><br>
                   Activá el permiso de ubicación de la app en los ajustes de tu teléfono ("Permitir todo el tiempo") y volvé a intentar conectarte.
+                </p>
+              </div>
+            `,
+            height: 'auto',
+            headerBackground: '#E11D48',
+            headerTextColor: 'white'
+          });
+          return;
+        }
+
+        // Sin avisos no se entera de las ofertas ni de los mensajes: no conecta. Solo frena si el
+        // celular dice que están bloqueados; con cualquier duda (app vieja, demora) conecta igual.
+        if (await driverPushBlocked()) {
+          hideGoConnecting(false);
+          showModal({
+            title: '🔔 Avisos Requeridos',
+            content: `
+              <div style="padding: 24px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px; background: var(--color-bg);">
+                <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); color: #ef4444; display: flex; align-items: center; justify-content: center;">
+                  ${icon('bell', 28)}
+                </div>
+                <h3 style="margin: 0; font-size: 17px; font-weight: 900; color: var(--color-text-primary);">Tenés los avisos bloqueados</h3>
+                <p style="margin: 0; font-size: 13px; color: var(--color-text-secondary); line-height: 1.55; font-weight: 600;">
+                  Para conectarte necesitás recibir las ofertas de pedidos y los mensajes de los clientes.<br><br>
+                  Abrí los ajustes del teléfono, entrá a Notificaciones, permitilas para GO! y volvé a intentar.
                 </p>
               </div>
             `,
@@ -9784,6 +9857,7 @@ export async function markAsDelivered(orderIdOrIds) {
     if (writeOutcome === null) {
       showToast('📶 Señal débil: la entrega se sincroniza apenas vuelva la conexión.', 'warning', 5000);
     }
+    AudioManager.hapticSuccess();
 
     // 2. Fetch the orders for rewards calculation & UI display
     let orders = [];

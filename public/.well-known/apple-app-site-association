@@ -1,0 +1,12 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["696U9X3N5W.com.godelivery.magdalena"],
+        "components": [
+          { "/": "/", "comment": "Las pantallas de la app van después del #: https://godelivery-magdalena.web.app/#/tienda/..." }
+        ]
+      }
+    ]
+  }
+}

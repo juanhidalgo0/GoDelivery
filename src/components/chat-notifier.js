@@ -14,12 +14,14 @@ let audioUnlocked = false;
 let activeListeners = [];
 let notifiedMessages = new Set();
 let unreadCounts = {};
+let startedAt = 0;
 let onUnreadChangeCallbacks = [];
 
 export function initChatNotifier() {
   cleanup();
   const user = getState().user;
   if (!user) return;
+  startedAt = Date.now();
 
   // Unlock audio
   document.addEventListener('click', () => {
@@ -111,19 +113,22 @@ function listenToChat(chatId, userId, chatData) {
       otherName = 'Soporte';
     }
 
-    // Check if unread count for this user is explicitly 0 in chat document metadata
-    if (chatData.unread && typeof chatData.unread[userId] === 'number' && chatData.unread[userId] === 0) {
-      unread = 0;
-    } else {
+    // Se cuenta por cada mensaje. Antes se miraba chat.unread del momento en que empezó la escucha:
+    // quien ya había abierto el chat tenía 0 ahí para siempre y no recibía sonido, cartel ni contador.
+    {
       snap.docs.forEach(d => {
         const msg = d.data();
         if (msg.senderId !== userId && !msg.read) {
           unread++;
           const msgKey = `${chatId}_${d.id}`;
           if (!notifiedMessages.has(msgKey)) {
-            if (!isInitialLoad) {
+            // El primer mensaje de un chat llega en la primera lectura: también es nuevo si es de
+            // después de abrir la app (antes ese no avisaba nunca).
+            const sentAt = msg.timestamp?.toMillis?.() || 0;
+            const chatOnScreen = !!document.getElementById(`chat-messages-${chatId}`);
+            if ((!isInitialLoad || sentAt > startedAt) && !chatOnScreen) {
               notifiedMessages.add(msgKey);
-              
+
               // Play sound alert
               try {
                 AudioManager.playSynthMessageReceive();
@@ -137,12 +142,12 @@ function listenToChat(chatId, userId, chatData) {
                     : `#/pedido/${order.id}`)
                 : `#/mis-chats`;
 
-              sendLocalNotification(`💬 ${msg.senderName || otherName}`, msg.text, {
+              sendLocalNotification(`💬 ${msg.senderName || otherName}`, chatPreview(msg), {
                 tag: `chat-${chatId}`,
                 url: clickUrl,
                 type: 'chat'
               });
-              showGlobalMessageBanner(msg.senderName || otherName, msg.text, chatData.orderId || '', chatId, order ? (order.userId !== userId) : false, order);
+              showGlobalMessageBanner(escapeBanner(msg.senderName || otherName), escapeBanner(chatPreview(msg)), chatData.orderId || '', chatId, order ? (order.userId !== userId) : false, order);
             } else {
               notifiedMessages.add(msgKey);
             }
@@ -157,6 +162,9 @@ function listenToChat(chatId, userId, chatData) {
   }, (err) => console.warn('[ChatNotifier] Messages listener error:', chatId, err?.code || err));
   activeListeners.push(unsub);
 }
+
+const chatPreview = (msg) => (msg.type === 'image' ? '📷 Foto' : msg.type === 'audio' ? '🎤 Mensaje de voz' : msg.text);
+const escapeBanner = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // Chat ids are `${orderId}_${type}`; the type decides which conversation opens.
 function splitChatId(chatId) {

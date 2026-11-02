@@ -1,3 +1,4 @@
+import { ticketLooksOff } from '../../utils/shopper.js';
 import { db } from '../../firebase.js';
 import { doc, getDoc, collection, query, where, orderBy, limit, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
 import { formatPrice, formatDate } from '../../utils/format.js';
@@ -6,6 +7,14 @@ import { showToast } from '../../components/toast.js';
 import { showModal, closeModal } from '../../components/modal.js';
 import { getState, subscribe } from '../../state.js';
 import { registerUnsubscribe } from '../../utils/cleanup.js';
+
+// "Compra el repartidor": qué cambió respecto de lo pedido, para revisarlo de un vistazo
+const SHOP_STATUS_LABEL = { missing: 'No había', removed: 'Lo sacó el cliente', added: 'Agregado por el repartidor', partial: 'Llevó menos', increased: 'Llevó más', replaced: 'Reemplazado' };
+function shopChangeLabel(o) {
+  if (!o.isShopper || o.shopPending !== false) return '';
+  if (ticketLooksOff(o.shopTicketTotal, o.shopComputedTotal)) return 'Ticket distinto';
+  return Number(o.shopAddedCount) > 0 || Number(o.shopRemovedCount) > 0 ? 'Cliente cambió el pedido' : '';
+}
 
 let globalOrdersCache = [];
 const userCache = {};
@@ -1052,6 +1061,7 @@ function renderFilteredOrders(container, filtered) {
           <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
             <div class="s-pill-v4" style="margin-bottom:2px;">${config.label}</div>
             <div style="font-weight:900; font-size:18px; color:var(--color-primary);">${formatPrice(o.total || 0)}</div>
+            ${shopChangeLabel(o) ? `<div style="margin-top:4px; display:inline-block; padding:2px 8px; border-radius:8px; background:rgba(245,158,11,0.15); color:#b45309; font-size:10.5px; font-weight:900;">${shopChangeLabel(o)}</div>` : ''}
           </div>
         </div>
 
@@ -1365,11 +1375,16 @@ window.showOrderDetail = async (idOrObject) => {
        ` : `
          <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:15px;">
            ${o.items?.map(i => `
-             <div style="display:flex; justify-content:space-between; font-weight:700; font-size:14px;">
-               <span style="color:var(--color-text);"><span style="color:var(--color-primary);">${i.qty}x</span> ${i.name}</span>
-               <span style="color:var(--color-text-secondary);">${formatPrice(i.price * i.qty)}</span>
+             <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; font-weight:700; font-size:14px;">
+               <span style="display:flex; align-items:center; gap:8px; min-width:0; color:var(--color-text);">${i.image ? `<img src="${i.image}" alt="" loading="lazy" style="width:36px; height:36px; border-radius:9px; object-fit:cover; flex-shrink:0; background:#fff;">` : ''}<span><span style="color:var(--color-primary);">${i.qty}x</span> ${i.name}${SHOP_STATUS_LABEL[i.shopStatus] ? `<small style="display:block; font-size:11px; color:#b45309;">${SHOP_STATUS_LABEL[i.shopStatus]}</small>` : ''}</span></span>
+               <span style="color:var(--color-text-secondary); white-space:nowrap;">${formatPrice(i.price * i.qty)}</span>
              </div>
            `).join('') || '<p style="text-align:center; opacity:0.5;">Sin productos</p>'}
+           ${shopChangeLabel(o) || o.shopTicketPhoto ? `
+             <div style="padding:10px 12px; border-radius:12px; background:rgba(245,158,11,0.1); font-size:12.5px; font-weight:700; color:var(--color-text-secondary); line-height:1.5;">
+               ${o.shopTicketTotal ? `Marcado ${formatPrice(o.shopComputedTotal || 0)} · Ticket ${formatPrice(o.shopTicketTotal)}` : `Marcado ${formatPrice(o.shopComputedTotal || 0)} · sin ticket cargado`}
+               ${o.shopTicketPhoto ? `<br><a href="${o.shopTicketPhoto}" target="_blank" rel="noopener noreferrer" style="color:var(--color-primary); font-weight:800;">Ver foto del ticket</a>` : ''}
+             </div>` : ''}
          </div>
        `}
        

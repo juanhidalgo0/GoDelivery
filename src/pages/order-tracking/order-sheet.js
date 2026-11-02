@@ -11,6 +11,9 @@ const isGoCash = (o) => o.favorType === 'gocash' || o.isGoCash === true;
 // "Compra el repartidor": qué pasó con cada producto en el mostrador
 function shopNote(it) {
   if (it.shopStatus === 'missing') return '<small>No había: no lo pagás</small>';
+  if (it.shopStatus === 'removed') return '<small>Lo sacaste del pedido</small>';
+  if (it.shopStatus === 'increased') return `<small>Pediste ${esc(it.orderedQty)}, llevás ${esc(it.qty)}</small>`;
+  if (it.shopStatus === 'added') return '<small>Agregado a tu pedido</small>';
   if (it.shopStatus === 'partial') return `<small>Había ${esc(it.qty)} de ${esc(it.orderedQty)}</small>`;
   if (it.shopStatus === 'replaced' && it.replacement) return `<small>Cambiado por ${esc(it.replacement.name)}</small>`;
   return '';
@@ -81,7 +84,8 @@ function sheetHtml(o, flags) {
     what = (Array.isArray(o.items) ? o.items : []).map(it => `
       <div class="gt-od-item">
         <span class="gt-od-qty">${isWeighedItem(it) ? esc(itemWeightLabel(it)) : `${esc(it.qty || it.quantity || 1)}×`}</span>
-        <div class="gt-od-name">${it.shopStatus === 'missing' ? `<s style="opacity:.6">${esc(it.name || it.title || 'Producto')}</s>` : esc(it.name || it.title || 'Producto')}${shopNote(it)}${isWeighedItem(it) ? `<small>${money(itemPricePerKg(it))}/kg · ${Number(it.actualGrams) > 0 ? `pediste ${formatWeight(orderedGrams(it))}, pesó ${formatWeight(it.actualGrams)}` : 'falta pesar'}</small>` : ''}${it.notes ? `<small>“${esc(it.notes)}”</small>` : ''}</div>
+        ${it.image ? `<img class="gt-od-thumb" src="${esc(it.image)}" alt="" loading="lazy">` : ''}
+        <div class="gt-od-name">${it.shopStatus === 'missing' || it.shopStatus === 'removed' ? `<s style="opacity:.6">${esc(it.name || it.title || 'Producto')}</s>` : esc(it.name || it.title || 'Producto')}${shopNote(it)}${isWeighedItem(it) ? `<small>${money(itemPricePerKg(it))}/kg · ${Number(it.actualGrams) > 0 ? `pediste ${formatWeight(orderedGrams(it))}, pesó ${formatWeight(it.actualGrams)}` : 'falta pesar'}</small>` : ''}${it.notes ? `<small>“${esc(it.notes)}”</small>` : ''}</div>
         <span class="gt-od-price">${money((Number(it.price) || 0) * (Number(it.qty || it.quantity) || 1))}</span>
       </div>`).join('');
   }
@@ -110,6 +114,8 @@ function sheetHtml(o, flags) {
             : `Tenés productos por peso: el comercio los pesa al prepararlos y pagás lo que pesaron (hasta un ${Math.round(WEIGHT_TOLERANCE * 100)}% más o menos). Te avisamos el total final.`}</span></div>` : ''}
           ${o.hasWeighedItems && o.weighPending === false && Math.round(Number(o.estimatedTotal) || 0) !== Math.round(total) ? `<div class="gt-od-pay"><span>Ya lo pesaron: el estimado era ${money(o.estimatedTotal)}.</span></div>` : ''}
           <div class="gt-od-pay">${icon(isTransfer(o) ? 'creditCard' : 'dollarSign', 15)}<span>${payNote}</span></div>
+          ${o.isShopper && Number(o.shopTicketTotal) > 0 && o.shopTicketTotal !== o.shopComputedTotal ? `<div class="gt-od-pay"><span>El total de productos es el del ticket del local, que va con tu pedido.</span></div>` : ''}
+          ${o.shopTicketPhoto ? `<div class="gt-od-pay">${icon('image', 15)}<a href="${esc(o.shopTicketPhoto)}" target="_blank" rel="noopener noreferrer" style="color:inherit;font-weight:700;text-decoration:underline;">Ver foto del ticket</a></div>` : ''}
         </div>
         ${!o.isTrip && !isTakeaway(o) && o.deliveryAddress ? `
           <div class="gt-od-sec">Entrega</div>
@@ -159,6 +165,7 @@ const ORDER_SHEET_CSS = `
   .gt-od-box { background: var(--gt-card, #F5F6F8); border-radius: 18px; padding: 2px 14px; }
   .gt-od-item { display: flex; align-items: flex-start; gap: 10px; padding: 12px 0; }
   .gt-od-item + .gt-od-item { border-top: 1px solid var(--gt-line, #E5E7EB); }
+  .gt-od-thumb { width: 40px; height: 40px; border-radius: 10px; object-fit: cover; flex-shrink: 0; background: #fff; }
   .gt-od-qty { min-width: 28px; height: 28px; border-radius: 9px; background: var(--gt-bg, #fff); color: var(--gt-tx2, #475569); font-size: 12.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .gt-od-name { flex: 1; min-width: 0; font-size: 14.5px; font-weight: 600; line-height: 1.35; padding-top: 4px; }
   .gt-od-name small { display: block; font-size: 13px; font-weight: 500; color: var(--gt-tx2, #475569); margin-top: 2px; }

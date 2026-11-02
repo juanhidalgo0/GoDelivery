@@ -5,11 +5,11 @@
 //
 // La app repite estas cuentas en src/utils/shopper.js para mostrarlas: si cambia una, cambia la otra.
 
-const SHOP_STATUSES = ["found", "missing", "replaced"];
-// El ticket puede diferir un poco de la suma (redondeos, una promo del local); más que esto
-// es un error de carga y se pide revisarlo.
-const TICKET_TOLERANCE = 0.2;
-const TICKET_TOLERANCE_MIN = 500;
+// missing: no había (se agota 24 h) · removed: lo sacó el cliente (sigue a la venta)
+const SHOP_STATUSES = ["found", "missing", "removed", "replaced"];
+// Lo que puede agregar el repartidor si el cliente cambia el pedido
+const MAX_ADDED_ITEMS = 50;
+const MAX_ADDED_QTY = 99;
 // Un producto que el repartidor no encontró queda "agotado" en la app este tiempo.
 const MISSING_HIDE_MS = 24 * 60 * 60 * 1000;
 
@@ -27,14 +27,16 @@ const isShopperCommerce = (c) => !!c && c.fulfillmentMode === "shopper";
 const isOnlinePayment = (method) => /tarjeta|card|online|prepago|mp_checkout/i.test(String(method || ""));
 
 /**
- * results: { [índice del renglón]: { status: 'found'|'missing'|'replaced', qty?, replacementName?, replacementPrice? } }
+ * results: { [índice del renglón]: { status: 'found'|'missing'|'removed'|'replaced', qty?, replacementName?, replacementPrice? } }
  * Un renglón sin resultado cuenta como encontrado completo. ticketTotal: lo que dice el ticket del
- * local (opcional); si viene y está cerca de la suma, manda el ticket.
+ * local (opcional); si viene, manda el ticket sea cual sea: el físico va con el pedido.
+ * added: [{ name, price, qty }] productos que el cliente sumó por fuera de la app.
  */
-function applyShopping(order, results = {}, ticketTotal = null) {
+function applyShopping(order, results = {}, ticketTotal = null, added = []) {
   const items = Array.isArray(order.items) ? order.items : [];
   const errors = [];
   const missing = [];
+  const removed = [];
   const replaced = [];
   let computed = 0;
 
@@ -47,6 +49,10 @@ function applyShopping(order, results = {}, ticketTotal = null) {
     if (status === "missing") {
       missing.push(idx);
       return { ...base, shopStatus: "missing", qty: 0, price: unit, replacement: null };
+    }
+    if (status === "removed") {
+      removed.push(idx);
+      return { ...base, shopStatus: "removed", qty: 0, price: unit, replacement: null };
     }
     if (status === "replaced") {
       if (order.allowReplacement !== true) errors.push(`El cliente no aceptó reemplazos (${item.name}).`);
@@ -72,14 +78,27 @@ function applyShopping(order, results = {}, ticketTotal = null) {
         actualGrams: paid > 0 && perKg > 0 ? Math.round(paid * 1000 / perKg) : null, paidByWeight: paid > 0 ? paid : null,
       };
     }
-    // Encontrado: puede llevar menos de lo pedido (si había menos, el resto falta)
-    const qty = Math.max(0, Math.min(orderedQty, Math.round(Number(r.qty ?? orderedQty))));
+    // Encontrado: puede llevar menos de lo pedido (si había menos, el resto falta) o más, si el cliente lo pidió
+    const qty = Math.max(0, Math.min(Math.max(orderedQty, MAX_ADDED_QTY), Math.round(Number(r.qty ?? orderedQty))));
     if (qty === 0) {
       missing.push(idx);
       return { ...base, shopStatus: "missing", qty: 0, price: unit, replacement: null };
     }
     computed += unit * qty;
-    return { ...base, shopStatus: qty < orderedQty ? "partial" : "found", qty, price: unit, replacement: null };
+    return { ...base, shopStatus: qty < orderedQty ? "partial" : qty > orderedQty ? "increased" : "found", qty, price: unit, replacement: null };
+  });
+
+  const addedItems = (Array.isArray(added) ? added : []).slice(0, MAX_ADDED_ITEMS).map((a) => {
+    // Lo escribe el repartidor y se muestra en varias pantallas: sin marcas de HTML
+    const name = String(a?.name || "").replace(/[<>]/g, "").trim().slice(0, 120);
+    const price = Number(a?.price);
+    const qty = Math.max(1, Math.min(MAX_ADDED_QTY, Math.round(Number(a?.qty) || 1)));
+    if (!name || !(price > 0)) errors.push("Falta el nombre o el precio de un producto agregado.");
+    computed += (price > 0 ? price : 0) * qty;
+    return {
+      comercioId: order.comercioId || null, comercioName: order.comercioName || null, name, qty, price: round2(price) || 0,
+      orderedQty: 0, orderedPrice: 0, options: [], notes: "", shopStatus: "added", replacement: null,
+    };
   });
 
   computed = round2(computed);
@@ -87,9 +106,7 @@ function applyShopping(order, results = {}, ticketTotal = null) {
   const ticket = Number(ticketTotal);
   if (ticketTotal !== null && ticketTotal !== undefined && ticketTotal !== "") {
     if (!(ticket > 0)) errors.push("El total del ticket no es válido.");
-    else if (Math.abs(ticket - computed) > Math.max(computed * TICKET_TOLERANCE, TICKET_TOLERANCE_MIN)) {
-      errors.push(`El ticket ($${Math.round(ticket)}) no coincide con lo marcado ($${Math.round(computed)}). Revisá las cantidades.`);
-    } else subtotal = round2(ticket);
+    else subtotal = round2(ticket);
   }
 
   const rate = Number(order.appUsageFeeRate);
@@ -105,7 +122,7 @@ function applyShopping(order, results = {}, ticketTotal = null) {
   const total = Math.max(round2(subtotal + deliveryCost + appUsageFee - points - couponDiscount), 0);
 
   const patch = {
-    items: nextItems,
+    items: [...nextItems, ...addedItems],
     subtotal,
     appUsageFee,
     couponDiscount,
@@ -116,16 +133,19 @@ function applyShopping(order, results = {}, ticketTotal = null) {
     shopComputedTotal: computed,
     shopTicketTotal: ticket > 0 ? round2(ticket) : null,
     shopMissingCount: missing.length,
+    shopRemovedCount: removed.length,
     shopReplacedCount: replaced.length,
+    shopAddedCount: addedItems.length,
     // Lo por peso ya quedó pesado (lo cargó el repartidor)
     ...(items.some(isWeighed) ? { weighPending: false } : {}),
   };
   if (order.totalAmount !== undefined) patch.totalAmount = total;
-  const allMissing = items.length > 0 && missing.length === items.length;
-  return { patch, missing, replaced, errors, allMissing };
+  // No queda nada para llevar: el pedido se cancela
+  const allMissing = items.length > 0 && missing.length + removed.length === items.length && addedItems.length === 0;
+  return { patch, missing, removed, replaced, errors, allMissing };
 }
 
 module.exports = {
-  SHOP_STATUSES, TICKET_TOLERANCE, MISSING_HIDE_MS,
+  SHOP_STATUSES, MAX_ADDED_ITEMS, MAX_ADDED_QTY, MISSING_HIDE_MS,
   isShopperCommerce, isOnlinePayment, applyShopping,
 };

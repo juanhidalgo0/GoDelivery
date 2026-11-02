@@ -16,8 +16,8 @@ export function loadShopperMarks(orderId, itemsCount) {
   }
 }
 
-export function saveShopperMarks(orderId, state, ticket) {
-  try { localStorage.setItem(KEY + orderId, JSON.stringify({ state, ticket, at: Date.now() })); } catch (e) { /* sin almacenamiento */ }
+export function saveShopperMarks(orderId, state, ticket, added = [], photo = '') {
+  try { localStorage.setItem(KEY + orderId, JSON.stringify({ state, ticket, added, photo, at: Date.now() })); } catch (e) { /* sin almacenamiento */ }
 }
 
 export function clearShopperMarks(orderId) {
